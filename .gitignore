@@ -1,0 +1,17 @@
+.DS_Store
+.ipynb_checkpoints/
+__pycache__/
+*.py[cod]
+
+# common local envs
+.venv/
+venv/
+.python-version
+
+# editor / tooling
+.idea/
+.vscode/
+
+# data / artifacts (uncomment as needed)
+# data/
+# outputs/

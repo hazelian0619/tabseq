@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Auto-sync after each commit.
+# - If no remote is configured yet, do nothing.
+# - If push fails (offline/permission), do not interrupt workflow.
+
+if ! git remote get-url origin >/dev/null 2>&1; then
+  exit 0
+fi
+
+git push -u origin HEAD >/dev/null 2>&1 || true
