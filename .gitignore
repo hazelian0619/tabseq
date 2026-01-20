@@ -13,5 +13,5 @@ venv/
 .vscode/
 
 # data / artifacts (uncomment as needed)
-# data/
-# outputs/
+data/
+outputs/

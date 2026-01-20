@@ -93,10 +93,7 @@
 │   ├── default.yaml             # 默认超参（depth、lr、batch等）
 │   └── datasets/
 │       └── california_housing.yaml
-├── outputs/                     # 每次实验自动创建子目录（不进git）
-└── tests/
-    ├── test_trace_encoder.py    # 编码/解码一致性
-    └── test_smoke_train.py      # 小数据跑1-2步不报错
+└── outputs/                     # 每次实验自动创建子目录（不进git）
 ```
 
 > 目前仓库还没有 `src/` 等目录；先按里程碑逐步补齐即可。
@@ -133,6 +130,9 @@
 4) 写评测脚本 `scripts/eval.py`：
    - 载入 checkpoint
    - 用 `ExtendedHolographicMetric` 输出指标 JSON/CSV
+5) 快速验证（先不强制上完整测试体系）：
+   - 至少能完成一次 `train -> eval` 运行，且输出指标文件
+   - 关键组件（编码/解码、数据 batch、模型 forward）不报错即可
 
 验收产物：
 - `python scripts/train.py ...` 一条命令能跑完并生成 `outputs/exp_xxx/`
@@ -204,3 +204,11 @@
 - `feat(train): add minimal training loop`
 - `fix(metrics): align PICP computation with benchmark`
 
+---
+
+## 6. 质量保障（可选，但推荐尽早加）
+
+测试/静态检查属于“工程质量层”，不影响你先把主线跑通，但会极大降低后续迭代成本。
+
+- 建议单独维护：`docs/QUALITY.md`（测试策略、覆盖范围、如何跑）
+- 最小目标：给 `TraceLabelEncoder` 加 round-trip 测试；给训练脚本加一个 smoke run（跑 1~2 个 batch 不报错）
