@@ -1,14 +1,43 @@
-# TabSeq / Trace Regression (WIP)
+# TabSeq-Trace Regression
 
-这份仓库的目标是把“表格回归(连续 y)”改写成“预测一串二分决策序列(0/1)”，从而同时得到：
+This repository turns tabular regression (continuous `y`) into predicting a
+binary decision trace over a fixed binning. The pipeline outputs:
 
-- 点预测 `y_hat`（用于 MAE / RMSE）
-- 预测区间 `[L, U]`（用于覆盖率/区间宽度等不确定性指标）
+- Point accuracy: MAE / RMSE
+- Interval quality: PICP / MPIW
 
-当前仓库以两个 notebook 为主：
-- `tabseq_trace_design.ipynb`：标签编码/数据组织/评估指标的核心骨架（方法侧）
-- `quantile_regression_extended_benchmark.ipynb`：区间评估口径与简化 benchmark（基线侧）
+## Project Layout
 
-要把它提升到“工业级可复现工程”，请从执行文档开始：
-- `docs/EXECUTION.md`
+- `src/tabseq/` core library (data, labels, models, metrics)
+- `scripts/` training/eval/inference entrypoints
+- `scripts/analysis/` analysis utilities (beam, temperature sweep, plots)
+- `docs/` execution plan, dev log, and reports
+- `configs/` runnable configs (eval/inference/sweeps)
+- `pre/` legacy notebooks and reference PDFs
 
+## Quickstart
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -U pip
+python -m pip install -e .
+python -m pip install numpy pandas torch scikit-learn
+```
+
+Train (minimal run):
+
+```bash
+python scripts/train.py --dataset california_housing
+```
+
+Evaluate:
+
+```bash
+python scripts/eval.py --ckpt outputs/<dataset>/run_<timestamp>/
+```
+
+## Notes
+
+- The main execution milestones live in `docs/EXECUTION.md`.
+- The architecture walkthrough is in `docs/ARCHITECTURE.md`.

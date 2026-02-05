@@ -1,214 +1,55 @@
-# 工业级执行文档（从 0 到可复现对比实验）
+根据你们讨论的所有内容，我整理了一个完整的执行路线图。按照**依赖关系**和**优先级**排序，确保每个阶段产出明确、可验证：
 
-本文件回答三个问题：
-1) 这个项目最终交付什么（对导师/提案的“工程化标准”）
-2) 我们把 notebook 里的方法拆成哪些模块（逻辑架构）
-3) 每一步怎么做（按里程碑推进、每步有可验收产物）
+## 📋 完整任务执行表（2周核心目标 + 1周优化）
 
-> 约定：本文用“桶/bin/叶子桶”表示对连续 y 的均匀离散化；用“序列/bit 序列”表示叶子桶编号的二进制表示。
+| 阶段 | 任务编号 | 任务内容 | 具体行动 | 时间 | 验收标准（产出） | 优先级 |
+|------|---------|---------|---------|------|----------------|--------|
+| **Phase 1: 代码整理与基础设施** | 1.1 | 清理项目结构 | 删除调试代码、统一接口、整理文件夹（data/models/utils/experiments） | 0.5天 | 干净的GitHub repo结构 + README | P0 |
+| | 1.2 | 确认数据pipeline | 验证加州房价数据加载、预处理、train/val/test分割是否正确 | 0.5天 | 能跑通baseline（原FT提取器） | P0 |
+| **Phase 2: 特征提取器替换** | 2.1 | 复现RealMLP | 从NeurIPS代码库拉取RealMLP，测试在房价数据上是否收敛 | 1天 | RealMLP能输出embeddings（维度对齐） | P0 |
+| | 2.2 | 集成到你的架构 | `RealMLP → Encoder → Bucket Head`，确保维度匹配 | 0.5天 | 完整pipeline跑通（loss下降） | P0 |
+| | 2.3 | 对比实验（可选） | 同时保留FT-Transformer路径，作为ablation对比 | 0.5天 | 两条特征提取路径都能运行 | P1 |
+| **Phase 3: 区间宽度分析** | 3.1 | 设计宽度扫描脚本 | 固定模型，遍历桶宽= [openreview](https://openreview.net/forum?id=hXB2yFoGN2)，记录每个宽度的覆盖率与平均区间宽度 | 1天 | 输出CSV：`width, coverage, avg_interval, RMSE` | P0 |
+| | 3.2 | 实现校准-锐度指标 | 参考Gneiting公式：`Score = Coverage - λ×Width`，λ可调 | 0.5天 | 单数据集的宽度-性能曲线图 | P0 |
+| | 3.3 | 找最优宽度 | 分析曲线，确定房价数据的"性价比最高"区间宽度 | 0.5天 | 结论：最优宽度=64或128 + 理由 | P0 |
+| **Phase 4: 多数据集验证** | 4.1 | 选择OpenML数据集 | 从OpenML-CTR23选3-5个回归数据集（不同规模、特征数） | 0.5天 | 数据集列表：如Bike Sharing, House Sales, Diamonds, Ames Housing | P0 |
+| | 4.2 | 批量训练 | 用统一超参在多数据集上训练（固定最优宽度） | 2天 | 每个数据集的性能表格 | P0 |
+| | 4.3 | 横向对比 | 对比RealMLP vs FT-Transformer在不同数据集的表现 | 0.5天 | 性能对比表：RMSE + Coverage + 区间宽度 | P1 |
+| **Phase 5: 理论补充** | 5.1 | 学习Conformal Prediction | 阅读Gneiting 2007论文 + Nixtla教程，理解校准-锐度权衡 | 1天（可并行） | 笔记：3个核心公式 + 1个Python demo | P1 |
+| | 5.2 | 实现Conformal wrapper | 基于校准集残差动态调整区间宽度 | 1天 | Conformal版本代码 + 实验对比 | P2 |
+| **Phase 6: 可视化与报告** | 6.1 | 绘制核心图表 | ① 宽度-覆盖率曲线 ② 不同数据集性能热力图 ③ 误差分布箱线图 | 1天 | 3张高质量论文图 | P0 |
+| | 6.2 | 撰写实验部分 | 描述方法、实验设置、结果分析（英文初稿） | 2天 | 3-5页LaTeX草稿 | P1 |
+| | 6.3 | 与陈老师讨论 | 汇报进展，确认下一步方向（投稿CCF-B或继续优化） | 0.5天 | 会议纪要 + 改进清单 | P0 |
 
----
+***
 
-## 0. 最终交付标准（Definition of Done）
+## 🎯 执行逻辑说明
 
-做到下面这些，基本就满足“工业化、可复现、可对比”的提案标准：
+### **为什么这个顺序？**
+1. **Phase 1-2 (2天)**：打地基，确保代码能跑，避免后期返工
+2. **Phase 3 (2天)**：核心创新点（区间宽度分析），必须先在单数据集搞透
+3. **Phase 4 (3天)**：扩展泛化性，证明方法不是针对房价过拟合
+4. **Phase 5 (并行)**：理论支撑，让论文有深度（边实验边学习）
+5. **Phase 6 (3.5天)**：产出论文材料，为投稿准备
 
-- 能用单条命令训练：输入数据集 + 配置，输出 checkpoint、训练日志、评测指标 JSON/CSV
-- 能用单条命令评测：给 checkpoint + 数据集，输出固定口径指标（MAE/RMSE、PICP、MPIW、分桶命中率等）
-- 能跑基线并对齐同一口径：至少 2~3 个 baseline（如分位数回归/区间估计基线、普通回归 MLP、一个 tabular transformer）
-- 可复现：固定随机种子、记录环境/依赖、记录配置与数据切分
-- 可追踪：每次实验都有唯一 ID，能从日志定位“哪一次跑出来的结果”
-- 可协作：代码结构清晰（模块化、可测试）、有 README、能走 PR/review（即便你是一个人也按这个习惯做）
+### **关键里程碑检查点**
+- **第7天结束**：必须完成Phase 1-3，能展示"单数据集的宽度-性能曲线"
+- **第14天结束**：完成Phase 4，所有数据集实验跑完
+- **第21天**：论文初稿 + 与陈老师确认方向
 
----
+***
 
-## 1. 逻辑架构（把 notebook 拆成 6 个模块）
+## 📊 数据集推荐（OpenML-CTR23精选）
 
-从输入到输出是一条流水线：
+根据OpenML-CTR23基准套件 ，以下5个数据集覆盖不同规模和特征类型： [openml](https://www.openml.org/search?type=study&study_type=task&sort=tasks_included&id=353)
 
-1) 数据与预处理（X）
-   - 输入：原始表格（数值列 + 类别列）
-   - 输出：`x_num`（float tensor）、`x_cat`（long tensor）
+| 数据集 | 样本数 | 特征数 | 任务类型 | 选择理由 |
+|--------|--------|--------|---------|---------|
+| **California Housing** | 20,640 | 8 | 房价回归 | 你的baseline，必须保留 |
+| **Ames Housing** | 2,930 | 80 | 房价回归 | 高维特征，测试复杂交互 |
+| **Bike Sharing** | 17,389 | 16 | 需求预测 | 时间序列特征，测试趋势捕获 |
+| **Diamonds** | 53,940 | 9 | 价格回归 | 大规模数据，测试效率 |
+| **Medical Cost** | 1,338 | 6 | 费用预测 | 小数据集，测试过拟合控制 |
 
-2) 标签编码（y → 序列/桶）
-   - 位置：训练前（把回归标签变成“可监督的序列任务”）
-   - 组件：`TraceLabelEncoder`
-   - 输出：
-     - `y_seq`：长度 `depth` 的 0/1 序列（叶子桶编号的二进制）
-     - `y_mht`：形状 `[depth, n_bins]` 的 multi-hot（每一层二分后“仍可能的叶子集合”）
-     - `y_raw`：原始连续 y（评估仍要用）
+这些数据集来自OpenML-CTR23（35个回归任务的精选），已被社区验证 。 [openreview](https://openreview.net/pdf?id=HebAOoMm94)
 
-3) 数据集封装（Dataset / DataLoader）
-   - 组件：`TabSeqDataset`
-   - 输出（每个样本）：
-     - `dec_input = [SOS] + y_seq[:-1]`（teacher forcing：把真实前缀喂给模型）
-     - `y_mht`（监督目标）
-     - `x_num/x_cat`（条件信息）
-
-4) 模型（你们当前缺口）
-   - 输入：`x_num/x_cat` + `dec_input`
-   - 输出：`model_logits` 或 `model_probs`，形状建议为 `[batch, depth, n_bins]`
-   - 模型由两部分组成：
-     - Tabular Encoder：把表格 X 变成上下文向量（embedding）
-     - Sequence Decoder：按步预测（或一次性输出）每一步对叶子桶的“软约束”
-
-5) 还原与评估（模型输出 → 分布 → 点/区间 → 指标）
-   - 位置：训练中/训练后（统一口径出结果）
-   - 组件：`ExtendedHolographicMetric` + `decode_*`
-   - 输出：MAE、RMSE、PICP（区间覆盖率）、MPIW（区间宽度）、分桶命中率等
-
-6) 基线与对比（Benchmark）
-   - 位置：最终论文/提案要的对比表
-   - 要求：同数据切分、同评估口径、同日志记录方式
-
----
-
-## 2. 工程化目录结构（推荐）
-
-把 notebook 里的“概念验证”收敛成脚本后，建议落成如下结构：
-
-```
-.
-├── README.md
-├── docs/
-│   └── EXECUTION.md
-├── src/
-│   ├── data/
-│   │   ├── datasets.py          # 数据集加载/切分/预处理
-│   │   └── tabseq_dataset.py    # TabSeqDataset（含dec_input/y_mht）
-│   ├── labels/
-│   │   └── trace_encoder.py     # TraceLabelEncoder（encode / multi-hot / decode）
-│   ├── models/
-│   │   ├── tabular_encoder.py   # 数值/类别embedding与融合
-│   │   └── seq_decoder.py       # 序列预测头（最简版到Transformer版）
-│   ├── metrics/
-│   │   └── holographic.py       # ExtendedHolographicMetric
-│   └── utils/
-│       ├── seed.py              # 固定随机种子
-│       └── logging.py           # 统一日志/保存config
-├── scripts/
-│   ├── train.py                 # 训练入口：配置 -> 训练 -> 保存
-│   └── eval.py                  # 评测入口：checkpoint -> 指标
-├── configs/
-│   ├── default.yaml             # 默认超参（depth、lr、batch等）
-│   └── datasets/
-│       └── california_housing.yaml
-└── outputs/                     # 每次实验自动创建子目录（不进git）
-```
-
-> 目前仓库还没有 `src/` 等目录；先按里程碑逐步补齐即可。
-
----
-
-## 3. 里程碑计划（每一步都能验收）
-
-### M0：理解与验收（不改模型）
-目标：把“标签编码/评估口径”完全理解且可复现。
-
-步骤：
-- 跑通 `tabseq_trace_design.ipynb` 的验证单元（能输出指标）
-- 解释清楚三件事（写到 README 或汇报里）：
-  - y 如何变成 `leaf_idx`、如何变成 `y_seq`
-  - multi-hot 每一行代表什么
-  - 如何从叶子分布得到点预测与区间
-
-验收产物：
-- 一份简短说明（可直接发导师/学长）
-- notebook 输出的指标截图或保存的结果表
-
-### M1：最小闭环（端到端可训练）
-目标：不追最强效果，先把流水线 2→3→4→5 串起来。
-
-步骤：
-1) 把 `TraceLabelEncoder` 和 `TabSeqDataset` 从 notebook 抽到 `src/`
-2) 实现一个“最简模型”：
-   - Tabular Encoder：`x_num/x_cat` → 单个向量（MLP + embedding）
-   - Sequence Head：输出 `[depth, n_bins]` 的 logits（先不做复杂Transformer也可以）
-3) 写训练脚本 `scripts/train.py`：
-   - 固定 seed、记录 config
-   - 保存 checkpoint（最优验证集 MAE 或 RMSE）
-4) 写评测脚本 `scripts/eval.py`：
-   - 载入 checkpoint
-   - 用 `ExtendedHolographicMetric` 输出指标 JSON/CSV
-5) 快速验证（先不强制上完整测试体系）：
-   - 至少能完成一次 `train -> eval` 运行，且输出指标文件
-   - 关键组件（编码/解码、数据 batch、模型 forward）不报错即可
-
-验收产物：
-- `python scripts/train.py ...` 一条命令能跑完并生成 `outputs/exp_xxx/`
-- `python scripts/eval.py ...` 能复现同一口径指标
-
-### M2：对齐论文方法（Transformer + 条件生成）
-目标：实现“表格条件 + 序列预测”的更标准版本，对齐 Ord2Seq 思路。
-
-步骤：
-- 把 Sequence Head 升级为 decoder（可先用 PyTorch TransformerDecoder）
-- 让 decoder 以 `dec_input` 自回归，条件信息来自 tabular embedding（cross-attention 或 prefix）
-- 训练策略：teacher forcing；推理阶段可 greedy/beam（先 greedy）
-
-验收产物：
-- 训练曲线稳定
-- 推理可输出点预测 + 区间（评估脚本不改即可）
-
-### M3：基线、表格、实验管理
-目标：出对比表，达到“提案/论文可呈现”的工程状态。
-
-步骤：
-- 实现/接入 baseline：
-  - 简单回归（MLP）
-  - 分位数回归（pinball loss / quantile regression）
-  - 一个 tabular transformer（FT-Transformer/TabTransformer/SAINT 任选一个先做）
-- 统一评估口径（同一份 metric 代码）
-- 记录每个实验：
-  - 数据集名、depth、seed、模型名、参数量、训练时长
-  - 指标表（CSV）+ 关键图（可选）
-
-验收产物：
-- `results/benchmark.csv`（或 `outputs/**/metrics.json` 汇总）
-- README 写明如何复现表格
-
----
-
-## 4. 关键实现细则（避免走弯路）
-
-### 4.1 标签范围 v_min/v_max 怎么设
-- 训练/评估必须一致：同一数据集同一套 `v_min/v_max/depth`
-- 推荐：在训练集统计后固定（例如分位数裁剪），并把它写进 config/日志
-
-### 4.2 depth 怎么选
-- depth 越大：桶越细，点预测上限更好，但输出维度 `n_bins=2^depth` 会指数爆炸
-- 建议起步：`depth=6`（64桶）或 `depth=8`（256桶），先跑通再调
-
-### 4.3 multi-hot 监督的理解（训练时）
-- 第 t 行不是“唯一正确 leaf”，而是“包含 leaf 的那半棵子树的所有叶子”
-- 训练目标是学会逐步收缩候选集合（前粗后细）
-
-### 4.4 记录与可复现（强制要求）
-每次训练输出目录里至少要有：
-- `config.yaml`（完整配置）
-- `metrics_val.json`（验证集指标）
-- `checkpoint.pt`
-- `git.txt`（commit hash）
-
----
-
-## 5. 推荐工作方式（给新手的最小操作手册）
-
-你每天只做三件事：
-1) 选一个里程碑任务（例如：抽出 TraceLabelEncoder 到 src）
-2) 做完就能跑一个“最小验证”（例如：单元测试或一次 train/eval）
-3) 提交 git：让每一步都可回滚、可解释
-
-提交信息建议：
-- `feat(labels): extract TraceLabelEncoder`
-- `feat(train): add minimal training loop`
-- `fix(metrics): align PICP computation with benchmark`
-
----
-
-## 6. 质量保障（可选，但推荐尽早加）
-
-测试/静态检查属于“工程质量层”，不影响你先把主线跑通，但会极大降低后续迭代成本。
-
-- 建议单独维护：`docs/QUALITY.md`（测试策略、覆盖范围、如何跑）
-- 最小目标：给 `TraceLabelEncoder` 加 round-trip 测试；给训练脚本加一个 smoke run（跑 1~2 个 batch 不报错）

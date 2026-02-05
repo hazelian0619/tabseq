@@ -1,0 +1,47 @@
+eval:
+  dataset: null
+  mode: greedy
+  temperature: 1.0
+  confidence: 0.90
+  batch_size: 256
+  random_state: null
+
+inference:
+  dataset: null
+  mode: greedy
+  temperature: 1.0
+  batch_size: 256
+  widths: "0.2,0.4"
+  random_state: null
+
+temperature_sweep:
+  dataset: null
+  t_min: 0.5
+  t_max: 5.0
+  t_step: 0.1
+  confidence: 0.90
+  random_state: 0
+  batch_size: 256
+  out_dir: null
+
+width_scan:
+  dataset: null
+  mode: greedy
+  temperature: 1.0
+  confidence: 0.90
+  batch_size: 256
+  random_state: null
+  lambda_width: 0.5
+  device: cuda
+  out_dir: outputs/width_scan
+
+prefix_search:
+  dataset: null
+  mode: both
+  temperature: 1.0
+  confidence: 0.90
+  batch_size: 128
+  beam_size: 8
+  max_samples: 0
+  device: null
+  random_state: null
