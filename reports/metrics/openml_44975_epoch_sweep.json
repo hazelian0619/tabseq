@@ -1,0 +1,59 @@
+[
+  {
+    "epoch": 2,
+    "dataset": null,
+    "mode": "greedy",
+    "temperature": 1.0,
+    "bin_acc_0.2": 0.7047222222222222,
+    "bin_acc_0.4": 0.8367361111111111,
+    "PICP": 0.4338888888888889,
+    "MPIW": 17920.6875,
+    "width_stratified_PICP": {
+      "Width [0.0, 83027.1)": "0.4339 (n=14400)"
+    },
+    "metrics_path": "outputs/openml_44975/ep2_run_20260312_115135/metrics_val_greedy_T1_C0p9_cdf_mask1_20260312_115439.json"
+  },
+  {
+    "epoch": 5,
+    "dataset": null,
+    "mode": "greedy",
+    "temperature": 1.0,
+    "bin_acc_0.2": 0.8184722222222223,
+    "bin_acc_0.4": 0.9248611111111111,
+    "PICP": 0.3439583333333333,
+    "MPIW": 8351.3984375,
+    "width_stratified_PICP": {
+      "Width [0.0, 83027.1)": "0.3440 (n=14399)",
+      "Width [83027.1, 166054.1)": "0.0000 (n=1)"
+    },
+    "metrics_path": "outputs/openml_44975/ep5_run_20260312_115542/metrics_val_greedy_T1_C0p9_cdf_mask1_20260312_120346.json"
+  },
+  {
+    "epoch": 10,
+    "dataset": null,
+    "mode": "greedy",
+    "temperature": 1.0,
+    "bin_acc_0.2": 0.8039583333333333,
+    "bin_acc_0.4": 0.9127777777777778,
+    "PICP": 0.3004861111111111,
+    "MPIW": 7152.23779296875,
+    "width_stratified_PICP": {
+      "Width [0.0, 83027.1)": "0.3005 (n=14400)"
+    },
+    "metrics_path": "outputs/openml_44975/ep10_run_20260312_120454/metrics_val_greedy_T1_C0p9_cdf_mask1_20260312_122112.json"
+  },
+  {
+    "epoch": 20,
+    "dataset": null,
+    "mode": "greedy",
+    "temperature": 1.0,
+    "bin_acc_0.2": 0.8247916666666667,
+    "bin_acc_0.4": 0.9154861111111111,
+    "PICP": 0.14444444444444443,
+    "MPIW": 4409.14453125,
+    "width_stratified_PICP": {
+      "Width [0.0, 83027.1)": "0.1444 (n=14400)"
+    },
+    "metrics_path": "outputs/openml_44975/ep20_run_20260312_124050/metrics_val_greedy_T1_C0p9_cdf_mask1_20260312_132326.json"
+  }
+]

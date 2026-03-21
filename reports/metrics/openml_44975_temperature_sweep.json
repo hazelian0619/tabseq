@@ -1,0 +1,72 @@
+[
+  {
+    "temperature": 1.0,
+    "dataset": null,
+    "mode": "greedy",
+    "bin_acc_0.2": 0.8184722222222223,
+    "bin_acc_0.4": 0.9248611111111111,
+    "PICP": 0.3439583333333333,
+    "MPIW": 8351.3984375,
+    "width_stratified_PICP": {
+      "Width [0.0, 83027.1)": "0.3440 (n=14399)",
+      "Width [83027.1, 166054.1)": "0.0000 (n=1)"
+    },
+    "metrics_path": "outputs/openml_44975/ep5_run_20260312_115542/metrics_val_greedy_T1_C0p9_cdf_mask1_20260314_091841.json"
+  },
+  {
+    "temperature": 1.5,
+    "dataset": null,
+    "mode": "greedy",
+    "bin_acc_0.2": 0.8181944444444444,
+    "bin_acc_0.4": 0.9246527777777778,
+    "PICP": 0.35305555555555557,
+    "MPIW": 8723.13671875,
+    "width_stratified_PICP": {
+      "Width [0.0, 83027.1)": "0.3531 (n=14399)",
+      "Width [83027.1, 166054.1)": "0.0000 (n=1)"
+    },
+    "metrics_path": "outputs/openml_44975/ep5_run_20260312_115542/metrics_val_greedy_T1p5_C0p9_cdf_mask1_20260314_091945.json"
+  },
+  {
+    "temperature": 2.0,
+    "dataset": null,
+    "mode": "greedy",
+    "bin_acc_0.2": 0.8181944444444444,
+    "bin_acc_0.4": 0.9246527777777778,
+    "PICP": 0.36736111111111114,
+    "MPIW": 9274.42578125,
+    "width_stratified_PICP": {
+      "Width [0.0, 83027.1)": "0.3674 (n=14399)",
+      "Width [83027.1, 166054.1)": "0.0000 (n=1)"
+    },
+    "metrics_path": "outputs/openml_44975/ep5_run_20260312_115542/metrics_val_greedy_T2_C0p9_cdf_mask1_20260314_092046.json"
+  },
+  {
+    "temperature": 3.0,
+    "dataset": null,
+    "mode": "greedy",
+    "bin_acc_0.2": 0.8168055555555556,
+    "bin_acc_0.4": 0.9234027777777778,
+    "PICP": 0.4720138888888889,
+    "MPIW": 12441.1611328125,
+    "width_stratified_PICP": {
+      "Width [0.0, 83027.1)": "0.4724 (n=14388)",
+      "Width [83027.1, 166054.1)": "0.0000 (n=12)"
+    },
+    "metrics_path": "outputs/openml_44975/ep5_run_20260312_115542/metrics_val_greedy_T3_C0p9_cdf_mask1_20260314_092147.json"
+  },
+  {
+    "temperature": 4.0,
+    "dataset": null,
+    "mode": "greedy",
+    "bin_acc_0.2": 0.8172916666666666,
+    "bin_acc_0.4": 0.9232638888888889,
+    "PICP": 0.5878472222222222,
+    "MPIW": 16450.7578125,
+    "width_stratified_PICP": {
+      "Width [0.0, 83027.1)": "0.5885 (n=14375)",
+      "Width [83027.1, 166054.1)": "0.2400 (n=25)"
+    },
+    "metrics_path": "outputs/openml_44975/ep5_run_20260312_115542/metrics_val_greedy_T4_C0p9_cdf_mask1_20260314_092248.json"
+  }
+]
