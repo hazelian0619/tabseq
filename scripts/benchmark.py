@@ -34,6 +34,26 @@ def _load_config(run_dir: str) -> dict:
     with open(cfg_path, "r", encoding="utf-8") as f:
         return json.load(f)
 
+def _infer_dataset_from_path(run_dir: str) -> Optional[str]:
+    # Common layouts:
+    # - outputs/<dataset>/run_YYYY.../
+    # - outputs/baselines/<dataset>/<model>/run_YYYY.../
+    parts = os.path.normpath(run_dir).split(os.sep)
+    try:
+        # .../outputs/baselines/<dataset>/...
+        idx = parts.index("baselines")
+        if idx + 1 < len(parts):
+            return parts[idx + 1]
+    except ValueError:
+        pass
+    try:
+        idx = parts.index("outputs")
+        if idx + 1 < len(parts):
+            return parts[idx + 1]
+    except ValueError:
+        pass
+    return None
+
 
 def main() -> None:
     ap = argparse.ArgumentParser()
@@ -42,6 +62,11 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=None, help="only include runs with this seed")
     ap.add_argument("--models", type=str, default=None, help="comma-separated model names to include")
     ap.add_argument("--latest", action="store_true", help="keep only the latest run per model")
+    ap.add_argument(
+        "--latest-per-dataset",
+        action="store_true",
+        help="keep only the latest run per (dataset, model) pair",
+    )
     ap.add_argument("--include-extras", action="store_true", help="include width/bin diagnostics")
     args = ap.parse_args()
 
@@ -57,6 +82,7 @@ def main() -> None:
         metrics = _load_metrics(metrics_path)
         cfg = _load_config(dirpath)
         model_name = metrics.get("model") or cfg.get("model") or "unknown"
+        dataset_name = cfg.get("dataset") or metrics.get("dataset") or _infer_dataset_from_path(dirpath)
         if allow_models is not None and model_name not in allow_models:
             continue
         if args.seed is not None:
@@ -74,7 +100,7 @@ def main() -> None:
         rows.append(
             {
                 "run_dir": dirpath,
-                "dataset": cfg.get("dataset"),
+                "dataset": dataset_name,
                 "model": model_name,
                 "mode": metrics.get("mode", "n/a"),
                 "MAE": metrics.get("MAE"),
@@ -93,11 +119,20 @@ def main() -> None:
         )
 
     rows.sort(key=lambda r: r["run_dir"])
+    if args.latest and args.latest_per_dataset:
+        raise SystemExit("choose only one: --latest or --latest-per-dataset")
     if args.latest:
         latest_by_model = {}
         for row in rows:
             latest_by_model[row["model"]] = row
         rows = list(latest_by_model.values())
+        rows.sort(key=lambda r: r["run_dir"])
+    if args.latest_per_dataset:
+        latest_by_key = {}
+        for row in rows:
+            key = (row.get("dataset"), row.get("model"))
+            latest_by_key[key] = row
+        rows = list(latest_by_key.values())
         rows.sort(key=lambda r: r["run_dir"])
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     fieldnames = [

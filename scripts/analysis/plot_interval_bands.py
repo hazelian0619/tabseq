@@ -3,7 +3,7 @@
 Plot interval bands per sample (sorted), to visualize shape + sample counts.
 
 Example:
-  python3 scripts/plot_interval_bands.py \
+  python3 scripts/analysis/plot_interval_bands.py \
     --inputs leaf_probs_val_prefix_beam_*.npz \
     --labels beam16 \
     --method cdf --confidence 0.9 \

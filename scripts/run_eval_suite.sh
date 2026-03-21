@@ -141,13 +141,13 @@ fi
 if [[ "$RUN_PREFIX" -eq 1 ]]; then
   echo "[prefix_search] beam sizes: ${BEAM_ARR[*]}"
   for beam in "${BEAM_ARR[@]}"; do
-    python3 scripts/eval_prefix_search.py --ckpt "$CKPT" --mode beam --beam-size "$beam" \
+    python3 scripts/analysis/eval_prefix_search.py --ckpt "$CKPT" --mode beam --beam-size "$beam" \
       --batch-size "$PREFIX_BATCH_SIZE" --random-state "$RANDOM_STATE" --confidence "$CONFIDENCE" \
       --temperature "$TEMPERATURE" --export-leaf-probs --export-samples "$EXPORT_SAMPLES"
   done
 
   echo "[prefix_search] full (beam size $FULL_BEAM)"
-  python3 scripts/eval_prefix_search.py --ckpt "$CKPT" --mode full --beam-size "$FULL_BEAM" \
+  python3 scripts/analysis/eval_prefix_search.py --ckpt "$CKPT" --mode full --beam-size "$FULL_BEAM" \
     --batch-size "$PREFIX_BATCH_SIZE" --random-state "$RANDOM_STATE" --confidence "$CONFIDENCE" \
     --temperature "$TEMPERATURE" --export-leaf-probs --export-samples "$EXPORT_SAMPLES"
 fi

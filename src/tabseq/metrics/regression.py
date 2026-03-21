@@ -27,6 +27,8 @@ def compute_point_interval_metrics(
     width_bins: Optional[Sequence[float]] = None,
     bin_edges_02: Optional[Sequence[float]] = None,
     bin_edges_04: Optional[Sequence[float]] = None,
+    v_min: Optional[float] = None,
+    v_max: Optional[float] = None,
 ) -> Dict:
     """
     基线评估统一口径：
@@ -36,6 +38,10 @@ def compute_point_interval_metrics(
     诊断项：
       - width_stratified_PICP：按区间宽度分桶的覆盖率
       - bin_acc_0.2/0.4：把 y 与 y_hat 量化后的一致性命中率
+
+    注意：
+    - 若传入 v_min/v_max，则 bin_edges 采用该范围（与 TabSeq 口径对齐）。
+    - 若未传入 bin_edges 与 v_min/v_max，则使用 y_true 的最小/最大值推断边界。
     """
     y_true = y_true.view(-1)
     if y_pred is None:
@@ -75,8 +81,16 @@ def compute_point_interval_metrics(
         return out
 
     width_bins = list(width_bins or [0.0, 0.4, 0.8, 1.2, 1.6, 2.0, 100.0])
-    bin_edges_02 = np.asarray(bin_edges_02 if bin_edges_02 is not None else np.arange(0, 5.21, 0.2))
-    bin_edges_04 = np.asarray(bin_edges_04 if bin_edges_04 is not None else np.arange(0, 5.21, 0.4))
+    if bin_edges_02 is None or bin_edges_04 is None:
+        if v_min is None or v_max is None:
+            v_min = float(np.min(y_true_np))
+            v_max = float(np.max(y_true_np))
+        if bin_edges_02 is None:
+            bin_edges_02 = np.arange(v_min, v_max + 0.2, 0.2)
+        if bin_edges_04 is None:
+            bin_edges_04 = np.arange(v_min, v_max + 0.4, 0.4)
+    bin_edges_02 = np.asarray(bin_edges_02)
+    bin_edges_04 = np.asarray(bin_edges_04)
 
     # 诊断：宽度分桶后的覆盖率（窄区间通常更难命中）
     width_bins_idx = np.digitize(widths, width_bins) - 1

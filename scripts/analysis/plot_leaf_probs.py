@@ -3,7 +3,7 @@
 Plot leaf_probs distributions for multiple modes (greedy/beam/full) side-by-side.
 
 Typical usage:
-  python3 scripts/plot_leaf_probs.py \
+  python3 scripts/analysis/plot_leaf_probs.py \
     --inputs leaf_probs_val_greedy_*.npz leaf_probs_val_prefix_beam_*.npz \
     --labels greedy beam16 \
     --sample-idx 0 \

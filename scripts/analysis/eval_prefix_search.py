@@ -226,6 +226,8 @@ def main() -> None:
     ap.add_argument("--random-state", type=int, default=None, help="default uses checkpoint seed")
     ap.add_argument("--confidence", type=float, default=None)
     ap.add_argument("--temperature", type=float, default=None)
+    ap.add_argument("--interval-method", choices=["cdf", "peak_merge"], default=None)
+    ap.add_argument("--peak-merge-alpha", type=float, default=None)
     ap.add_argument("--mode", choices=["full", "beam", "both"], default=None)
     ap.add_argument("--beam-size", type=int, default=None)
     ap.add_argument("--max-samples", type=int, default=None, help="0 means use full validation set")
@@ -239,6 +241,8 @@ def main() -> None:
         "batch_size": 128,
         "confidence": 0.90,
         "temperature": 1.0,
+        "interval_method": "cdf",
+        "peak_merge_alpha": 0.33,
         "mode": "both",
         "beam_size": 8,
         "max_samples": 0,
@@ -251,6 +255,10 @@ def main() -> None:
     args.batch_size = choose(args.batch_size, prefix_cfg.get("batch_size"), defaults["batch_size"])
     args.confidence = choose(args.confidence, prefix_cfg.get("confidence"), defaults["confidence"])
     args.temperature = choose(args.temperature, prefix_cfg.get("temperature"), defaults["temperature"])
+    args.interval_method = choose(args.interval_method, prefix_cfg.get("interval_method"), defaults["interval_method"])
+    args.peak_merge_alpha = choose(
+        args.peak_merge_alpha, prefix_cfg.get("peak_merge_alpha"), defaults["peak_merge_alpha"]
+    )
     args.mode = choose(args.mode, prefix_cfg.get("mode"), defaults["mode"])
     args.beam_size = choose(args.beam_size, prefix_cfg.get("beam_size"), defaults["beam_size"])
     args.max_samples = choose(args.max_samples, prefix_cfg.get("max_samples"), defaults["max_samples"])
@@ -360,6 +368,8 @@ def main() -> None:
             leaf_probs=torch.from_numpy(leaf_probs_np),
             y_true=torch.from_numpy(y_metric),
             confidence=float(args.confidence),
+            interval_method=str(args.interval_method),
+            peak_merge_alpha=float(args.peak_merge_alpha),
             return_extras=True,
         )
         metrics["model"] = cfg.get("model", "tabseq")
@@ -398,6 +408,8 @@ def main() -> None:
             leaf_probs=torch.from_numpy(leaf_probs_np),
             y_true=torch.from_numpy(y_metric),
             confidence=float(args.confidence),
+            interval_method=str(args.interval_method),
+            peak_merge_alpha=float(args.peak_merge_alpha),
             return_extras=True,
         )
         metrics["model"] = cfg.get("model", "tabseq")
@@ -451,6 +463,8 @@ def main() -> None:
             "random_state": int(random_state),
             "confidence": float(args.confidence),
             "temperature": float(args.temperature),
+            "interval_method": str(args.interval_method),
+            "peak_merge_alpha": float(args.peak_merge_alpha),
             "mode": str(args.mode),
             "beam_size": int(args.beam_size),
             "max_samples": int(args.max_samples),
@@ -462,7 +476,10 @@ def main() -> None:
 
     if args.mode in ("full", "both"):
         m_full, leaf_full, y_raw_full, y_clip_full = run_full()
-        full_tag = f"prefix_full_{common_tag}_N{int(args.max_samples) or 'all'}_{timestamp}"
+        interval_tag = (
+            f"pm_a{_fmt_float(float(args.peak_merge_alpha))}" if str(args.interval_method) == "peak_merge" else "cdf"
+        )
+        full_tag = f"prefix_full_{common_tag}_{interval_tag}_N{int(args.max_samples) or 'all'}_{timestamp}"
         out_path = _safe_path(out_dir, f"metrics_val_{full_tag}.json")
         with open(out_path, "w", encoding="utf-8") as f:
             json.dump(m_full, f, ensure_ascii=False, indent=2)
@@ -477,8 +494,11 @@ def main() -> None:
 
     if args.mode in ("beam", "both"):
         m_beam, leaf_beam, y_raw_beam, y_clip_beam = run_beam()
+        interval_tag = (
+            f"pm_a{_fmt_float(float(args.peak_merge_alpha))}" if str(args.interval_method) == "peak_merge" else "cdf"
+        )
         beam_tag = (
-            f"prefix_beam_K{int(args.beam_size)}_{common_tag}_N{int(args.max_samples) or 'all'}_{timestamp}"
+            f"prefix_beam_K{int(args.beam_size)}_{common_tag}_{interval_tag}_N{int(args.max_samples) or 'all'}_{timestamp}"
         )
         out_path = _safe_path(out_dir, f"metrics_val_{beam_tag}.json")
         with open(out_path, "w", encoding="utf-8") as f:

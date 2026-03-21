@@ -110,12 +110,70 @@ class ExtendedHolographicMetric:
         U = upper_edges[upper_indices]  # (B,) 上界连续值（右边界）
         return IntervalResult(L=L, U=U)  # 返回区间结构体
 
+    @staticmethod
+    def _interval_bounds_from_leaf_probs_np(
+        leaf_probs: np.ndarray,
+        *,
+        bin_edges: np.ndarray,
+        confidence: float,
+        interval_method: str,
+        peak_merge_alpha: float,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """
+        统一的区间提取函数（纯 numpy），用于把 leaf_probs -> [L, U]。
+
+        - interval_method="cdf"：等尾分位点区间
+        - interval_method="peak_merge"：从最高峰出发，向两侧合并连续且 >= alpha*peak 的 bin（不回退）
+        """
+        if interval_method not in ("cdf", "peak_merge"):
+            raise ValueError(f"unknown interval_method: {interval_method}")
+        if not (0.0 < float(confidence) < 1.0):
+            raise ValueError("confidence must be in (0, 1)")
+
+        B, n_bins = leaf_probs.shape
+        if bin_edges.shape[0] != n_bins + 1:
+            raise ValueError(f"bin_edges must have length n_bins+1, got {bin_edges.shape[0]} vs {n_bins+1}")
+
+        if interval_method == "cdf":
+            cdf = np.cumsum(leaf_probs, axis=1)
+            tail = 1.0 - float(confidence)
+            lower_q = tail / 2.0
+            upper_q = 1.0 - (tail / 2.0)
+            lower_idx = (cdf >= lower_q).argmax(axis=1)
+            upper_idx = (cdf >= upper_q).argmax(axis=1)
+            L = bin_edges[lower_idx]
+            U = bin_edges[upper_idx + 1]
+            return L.astype(np.float32), U.astype(np.float32)
+
+        alpha = float(peak_merge_alpha)
+        if not (0.0 < alpha <= 1.0):
+            raise ValueError("peak_merge_alpha must be in (0, 1]")
+
+        L = np.empty((B,), dtype=np.float32)
+        U = np.empty((B,), dtype=np.float32)
+        for i in range(B):
+            probs = leaf_probs[i]
+            peak_idx = int(np.argmax(probs))
+            peak_val = float(probs[peak_idx])
+            thresh = peak_val * alpha
+            left = peak_idx
+            right = peak_idx
+            while left - 1 >= 0 and float(probs[left - 1]) >= thresh:
+                left -= 1
+            while right + 1 < n_bins and float(probs[right + 1]) >= thresh:
+                right += 1
+            L[i] = float(bin_edges[left])
+            U[i] = float(bin_edges[right + 1])
+        return L, U
+
     def compute_metrics(
         self,
         model_probs: torch.Tensor,  # (B, depth, n_bins) 模型每步的叶子概率
         y_true: torch.Tensor,  # (B,) 真实连续标签
         *,
         confidence: float = 0.90,  # 目标覆盖率，例如 0.90
+        interval_method: str = "cdf",  # 区间提取口径：cdf 或 peak_merge
+        peak_merge_alpha: float = 0.33,  # peak-merge 阈值比例（仅 interval_method=peak_merge 时生效）
         return_extras: bool = True,  # 是否返回诊断指标
     ) -> Dict:
         """
@@ -151,16 +209,22 @@ class ExtendedHolographicMetric:
         mae = torch.mean(torch.abs(y_pred_point - y_true)).item()  # 平均绝对误差
         rmse = torch.sqrt(torch.mean((y_pred_point - y_true) ** 2)).item()  # 均方根误差
 
-        # 3) 区间：对 leaf_probs 做 CDF，用分位点取 [L, U]
-        interval = self.interval_from_leaf_probs(leaf_probs, confidence=confidence)  # 计算区间
-        L_pred, U_pred = interval.L, interval.U  # 拆出上下界
+        # 3) 区间：从 leaf_probs 提取 [L, U]
+        leaf_probs_np = leaf_probs.detach().cpu().numpy()
+        bin_edges = (
+            float(self.encoder.v_min)
+            + np.arange(int(leaf_probs_np.shape[1]) + 1, dtype=np.float32) * float(self.encoder.bin_width)
+        ).astype(np.float32)
+        L_pred_np, U_pred_np = self._interval_bounds_from_leaf_probs_np(
+            leaf_probs_np,
+            bin_edges=bin_edges,
+            confidence=float(confidence),
+            interval_method=str(interval_method),
+            peak_merge_alpha=float(peak_merge_alpha),
+        )
 
-        # 4) PICP/MPIW：
-        #    - PICP：真实值落在区间内的比例（可靠性）
-        #    - MPIW：区间平均宽度（尖锐度）
+        # 4) PICP/MPIW（在 numpy 上统计）
         y_true_np = y_true.detach().cpu().numpy()  # 转 numpy 以便统计
-        L_pred_np = L_pred.detach().cpu().numpy()  # 区间下界 numpy
-        U_pred_np = U_pred.detach().cpu().numpy()  # 区间上界 numpy
         y_pred_point_np = y_pred_point.detach().cpu().numpy()  # 点预测 numpy
 
         covered = (y_true_np >= L_pred_np) & (y_true_np <= U_pred_np)  # 是否被区间覆盖
@@ -174,7 +238,10 @@ class ExtendedHolographicMetric:
             "confidence": float(confidence),  # 目标覆盖率（期望 PICP 接近它）
             "PICP": picp,  # 实际覆盖率
             "MPIW": mpiw,  # 区间平均宽度
+            "interval_method": str(interval_method),
         }
+        if str(interval_method) == "peak_merge":
+            out["peak_merge_alpha"] = float(peak_merge_alpha)
 
         if not return_extras:
             return out  # 若不需要诊断指标，直接返回核心指标
@@ -213,6 +280,8 @@ class ExtendedHolographicMetric:
         y_true: torch.Tensor,  # (B,) 真实连续标签
         *,
         confidence: float = 0.90,
+        interval_method: str = "cdf",
+        peak_merge_alpha: float = 0.33,
         return_extras: bool = True,
     ) -> Dict:
         """
@@ -241,12 +310,19 @@ class ExtendedHolographicMetric:
         mae = torch.mean(torch.abs(y_pred_point - y_true)).item()
         rmse = torch.sqrt(torch.mean((y_pred_point - y_true) ** 2)).item()
 
-        interval = self.interval_from_leaf_probs(leaf_probs, confidence=confidence)
-        L_pred, U_pred = interval.L, interval.U
+        leaf_probs_np = leaf_probs.detach().cpu().numpy()
+        bin_edges = (
+            float(self.encoder.v_min) + np.arange(int(n_bins) + 1, dtype=np.float32) * float(self.encoder.bin_width)
+        ).astype(np.float32)
+        L_pred_np, U_pred_np = self._interval_bounds_from_leaf_probs_np(
+            leaf_probs_np,
+            bin_edges=bin_edges,
+            confidence=float(confidence),
+            interval_method=str(interval_method),
+            peak_merge_alpha=float(peak_merge_alpha),
+        )
 
         y_true_np = y_true.detach().cpu().numpy()
-        L_pred_np = L_pred.detach().cpu().numpy()
-        U_pred_np = U_pred.detach().cpu().numpy()
         y_pred_point_np = y_pred_point.detach().cpu().numpy()
 
         covered = (y_true_np >= L_pred_np) & (y_true_np <= U_pred_np)
@@ -260,7 +336,10 @@ class ExtendedHolographicMetric:
             "confidence": float(confidence),
             "PICP": picp,
             "MPIW": mpiw,
+            "interval_method": str(interval_method),
         }
+        if str(interval_method) == "peak_merge":
+            out["peak_merge_alpha"] = float(peak_merge_alpha)
 
         if not return_extras:
             return out
