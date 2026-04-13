@@ -12,6 +12,6 @@ venv/
 .idea/
 .vscode/
 
-# data / artifacts (uncomment as needed)
-data/
-outputs/
+# data / artifacts (repo-root only)
+/data/
+/outputs/
