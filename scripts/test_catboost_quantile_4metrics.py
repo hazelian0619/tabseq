@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 import sys
+from time import perf_counter
 from typing import Any, Dict
 
 import numpy as np
@@ -18,8 +19,10 @@ from tabseq.baselines.four_metrics import (
     build_catboost_features,
     compute_four_metrics,
     conformalized_quantile_interval,
+    format_duration,
     infer_depth_from_targets,
     interval_midpoint,
+    log_progress,
     make_run_dir,
     normalize_interval_bounds,
     save_run_artifacts,
@@ -48,6 +51,7 @@ def main() -> None:
     ap.add_argument("--model-depth", type=int, default=6)
     ap.add_argument("--learning-rate", type=float, default=0.05)
     ap.add_argument("--l2-leaf-reg", type=float, default=3.0)
+    ap.add_argument("--log-every", type=int, default=50, help="training progress print period")
     ap.add_argument("--out-root", type=str, default="outputs/baselines_four_metrics")
     ap.add_argument("--run-id", type=str, default=None)
     args = ap.parse_args()
@@ -57,7 +61,18 @@ def main() -> None:
     except ImportError as exc:  # pragma: no cover
         raise RuntimeError("catboost is required for scripts/test_catboost_quantile_4metrics.py") from exc
 
+    load_start = perf_counter()
+    log_progress(
+        f"loading dataset={args.dataset} seed={int(args.seed)} val_size={float(args.val_size):.2f}"
+    )
     split = load_dataset_split(args.dataset, random_state=int(args.seed), val_size=float(args.val_size))
+    n_cat = 0 if split.X_cat_train is None else int(split.X_cat_train.shape[1])
+    log_progress(
+        "dataset loaded "
+        f"train_rows={len(split.y_train)} val_rows={len(split.y_val)} "
+        f"num_features={int(split.X_train.shape[1])} cat_features={n_cat} "
+        f"elapsed={format_duration(perf_counter() - load_start)}"
+    )
     auto_depth, auto_meta = infer_depth_from_targets(split.y_train)
     depth = int(args.depth) if args.depth is not None else int(auto_depth)
 
@@ -85,7 +100,13 @@ def main() -> None:
         x_cal = None
         y_fit = split.y_train
         y_cal = None
+    log_progress(
+        "prepared split "
+        f"interval_method={str(args.interval_method)} fit_rows={len(y_fit)} "
+        f"cal_rows={0 if y_cal is None else len(y_cal)} val_rows={len(split.y_val)} depth={depth}"
+    )
 
+    log_every = max(1, int(args.log_every))
     model = CatBoostRegressor(
         iterations=int(args.iterations),
         depth=int(args.model_depth),
@@ -93,10 +114,19 @@ def main() -> None:
         l2_leaf_reg=float(args.l2_leaf_reg),
         loss_function=f"MultiQuantile:alpha={q_lower},{q_upper}",
         random_seed=int(args.seed),
-        verbose=False,
+        verbose=log_every,
+    )
+    fit_start = perf_counter()
+    log_progress(
+        "start fit "
+        f"model=catboost loss=MultiQuantile iterations={int(args.iterations)} model_depth={int(args.model_depth)} "
+        f"learning_rate={float(args.learning_rate)} log_every={log_every}"
     )
     model.fit(x_fit, y_fit, cat_features=cat_features or None)
+    log_progress(f"fit finished elapsed={format_duration(perf_counter() - fit_start)}")
 
+    predict_start = perf_counter()
+    log_progress("start predict validation quantiles")
     pred_val = np.asarray(model.predict(x_val))
     if pred_val.ndim != 2 or pred_val.shape[1] != 2:
         raise ValueError(f"expected MultiQuantile predictions with shape (N, 2), got {pred_val.shape}")
@@ -121,6 +151,7 @@ def main() -> None:
     else:
         y_lower, y_upper = pred_lower_val, pred_upper_val
         interval_method = "quantile"
+    log_progress(f"prediction and interval construction finished elapsed={format_duration(perf_counter() - predict_start)}")
 
     y_pred = interval_midpoint(y_lower, y_upper)
     metrics = compute_four_metrics(
@@ -131,7 +162,7 @@ def main() -> None:
         encoder=encoder,
         confidence=float(args.confidence),
         tolerance_bins=1,
-        clip_interval_to_train_range=True,
+        clip_interval_to_train_range=(interval_method != "conformalized_quantile"),
     )
 
     run_dir, resolved_run_id = make_run_dir(
@@ -172,6 +203,8 @@ def main() -> None:
         **metrics,
     }
 
+    save_start = perf_counter()
+    log_progress("saving artifacts")
     save_run_artifacts(
         run_dir=run_dir,
         config=config,
@@ -182,6 +215,7 @@ def main() -> None:
         y_upper=y_upper,
     )
     model.save_model(os.path.join(run_dir, "model.cbm"))
+    log_progress(f"artifacts saved elapsed={format_duration(perf_counter() - save_start)} run_dir={run_dir}")
 
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     print(f"saved: {run_dir}")

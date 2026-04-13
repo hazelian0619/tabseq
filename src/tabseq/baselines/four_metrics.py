@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 from datetime import datetime
 from typing import Any, Dict, Optional
 
@@ -13,6 +14,48 @@ from tabseq.utils.config import write_json
 
 def default_run_id() -> str:
     return datetime.now().strftime("%Y%m%d_%H%M%S")
+
+
+def log_progress(message: str) -> None:
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    print(f"[{timestamp}] {message}", flush=True)
+
+
+def format_duration(seconds: float) -> str:
+    seconds = float(max(seconds, 0.0))
+    if seconds < 60.0:
+        return f"{seconds:.1f}s"
+    minutes, rem = divmod(seconds, 60.0)
+    if minutes < 60.0:
+        return f"{int(minutes)}m{rem:04.1f}s"
+    hours, minutes = divmod(minutes, 60.0)
+    return f"{int(hours)}h{int(minutes):02d}m{rem:04.1f}s"
+
+
+def make_lightgbm_heartbeat_callback(
+    *,
+    label: str,
+    start_time: float,
+    min_interval_seconds: float = 15.0,
+):
+    last_emit = [float(start_time)]
+    min_interval_seconds = float(max(min_interval_seconds, 0.0))
+
+    def _callback(env: Any) -> None:
+        now = time.perf_counter()
+        iteration = int(env.iteration) + 1
+        total_iterations = int(env.end_iteration)
+        should_emit = iteration >= total_iterations
+        if not should_emit and min_interval_seconds > 0.0:
+            should_emit = (now - last_emit[0]) >= min_interval_seconds
+        if should_emit:
+            last_emit[0] = now
+            log_progress(
+                f"{label} heartbeat iter={iteration}/{total_iterations} elapsed={format_duration(now - start_time)}"
+            )
+
+    _callback.order = 5
+    return _callback
 
 
 def make_run_dir(*, out_root: str, dataset: str, model: str, run_id: Optional[str]) -> tuple[str, str]:
@@ -152,6 +195,14 @@ def _quantile_higher(values: np.ndarray, q: float) -> float:
         return float(np.quantile(values, q, interpolation="higher"))
 
 
+def _finite_sample_conformal_level(n_values: int, confidence: float) -> float:
+    n_values = int(n_values)
+    if n_values <= 0:
+        raise ValueError("n_values must be positive")
+    confidence = float(np.clip(float(confidence), 0.0, 1.0))
+    return float(min(1.0, np.ceil((n_values + 1) * confidence) / n_values))
+
+
 def conformalized_quantile_interval(
     *,
     y_lower_cal: np.ndarray,
@@ -165,7 +216,8 @@ def conformalized_quantile_interval(
     lower_val, upper_val = normalize_interval_bounds(y_lower_val, y_upper_val)
     y_cal = np.asarray(y_cal, dtype=np.float64).reshape(-1)
     scores = np.maximum(lower_cal.astype(np.float64) - y_cal, y_cal - upper_cal.astype(np.float64))
-    correction = _quantile_higher(scores, float(confidence))
+    quantile_level = _finite_sample_conformal_level(scores.size, float(confidence))
+    correction = _quantile_higher(scores, quantile_level)
     y_lower = lower_val.astype(np.float64) - correction
     y_upper = upper_val.astype(np.float64) + correction
     y_lower, y_upper = normalize_interval_bounds(y_lower, y_upper)

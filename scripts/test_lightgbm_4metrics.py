@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 import sys
+from time import perf_counter
 from typing import Any, Dict
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -16,7 +17,10 @@ from tabseq.baselines.four_metrics import (
     compute_four_metrics,
     concat_num_cat,
     conformal_residual_interval,
+    format_duration,
     infer_depth_from_targets,
+    log_progress,
+    make_lightgbm_heartbeat_callback,
     make_run_dir,
     save_run_artifacts,
     split_train_calibration,
@@ -38,16 +42,30 @@ def main() -> None:
     ap.add_argument("--learning-rate", type=float, default=0.05)
     ap.add_argument("--subsample", type=float, default=0.8)
     ap.add_argument("--colsample-bytree", type=float, default=0.8)
+    ap.add_argument("--log-every", type=int, default=50, help="training progress print period")
+    ap.add_argument("--heartbeat-seconds", type=float, default=15.0, help="wall-clock heartbeat interval during fit")
     ap.add_argument("--out-root", type=str, default="outputs/baselines_four_metrics")
     ap.add_argument("--run-id", type=str, default=None)
     args = ap.parse_args()
 
     try:
+        import lightgbm
         from lightgbm import LGBMRegressor
     except ImportError as exc:  # pragma: no cover
         raise RuntimeError("lightgbm is required for scripts/test_lightgbm_4metrics.py") from exc
 
+    load_start = perf_counter()
+    log_progress(
+        f"loading dataset={args.dataset} seed={int(args.seed)} val_size={float(args.val_size):.2f}"
+    )
     split = load_dataset_split(args.dataset, random_state=int(args.seed), val_size=float(args.val_size))
+    n_cat = 0 if split.X_cat_train is None else int(split.X_cat_train.shape[1])
+    log_progress(
+        "dataset loaded "
+        f"train_rows={len(split.y_train)} val_rows={len(split.y_val)} "
+        f"num_features={int(split.X_train.shape[1])} cat_features={n_cat} "
+        f"elapsed={format_duration(perf_counter() - load_start)}"
+    )
     auto_depth, auto_meta = infer_depth_from_targets(split.y_train)
     depth = int(args.depth) if args.depth is not None else int(auto_depth)
 
@@ -67,6 +85,9 @@ def main() -> None:
     y_fit = split.y_train[idx_fit]
     X_cal = X_train[idx_cal]
     y_cal = split.y_train[idx_cal]
+    log_progress(
+        f"prepared split fit_rows={len(y_fit)} cal_rows={len(y_cal)} val_rows={len(split.y_val)} depth={depth}"
+    )
 
     model = LGBMRegressor(
         n_estimators=int(args.n_estimators),
@@ -78,8 +99,30 @@ def main() -> None:
         random_state=int(args.seed),
         verbosity=-1,
     )
-    model.fit(X_fit, y_fit)
+    log_every = max(1, int(args.log_every))
+    fit_start = perf_counter()
+    log_progress(
+        "start fit "
+        f"model=lightgbm objective=regression n_estimators={int(args.n_estimators)} "
+        f"num_leaves={int(args.num_leaves)} learning_rate={float(args.learning_rate)} log_every={log_every}"
+    )
+    model.fit(
+        X_fit,
+        y_fit,
+        eval_set=[(X_fit, y_fit)],
+        callbacks=[
+            make_lightgbm_heartbeat_callback(
+                label="lightgbm fit",
+                start_time=fit_start,
+                min_interval_seconds=float(args.heartbeat_seconds),
+            ),
+            lightgbm.log_evaluation(period=log_every),
+        ],
+    )
+    log_progress(f"fit finished elapsed={format_duration(perf_counter() - fit_start)}")
 
+    predict_start = perf_counter()
+    log_progress("start predict calibration/validation")
     pred_cal = model.predict(X_cal)
     pred_val = model.predict(X_val)
     y_lower, y_upper, residual_q = conformal_residual_interval(
@@ -88,6 +131,7 @@ def main() -> None:
         y_pred_val=pred_val,
         confidence=float(args.confidence),
     )
+    log_progress(f"prediction and interval construction finished elapsed={format_duration(perf_counter() - predict_start)}")
     metrics = compute_four_metrics(
         y_true=split.y_val,
         y_pred=pred_val,
@@ -136,6 +180,8 @@ def main() -> None:
         **metrics,
     }
 
+    save_start = perf_counter()
+    log_progress("saving artifacts")
     save_run_artifacts(
         run_dir=run_dir,
         config=config,
@@ -146,6 +192,7 @@ def main() -> None:
         y_upper=y_upper,
     )
     model.booster_.save_model(os.path.join(run_dir, "model.txt"))
+    log_progress(f"artifacts saved elapsed={format_duration(perf_counter() - save_start)} run_dir={run_dir}")
 
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     print(f"saved: {run_dir}")

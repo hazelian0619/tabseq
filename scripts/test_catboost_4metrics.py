@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 import sys
+from time import perf_counter
 from typing import Any, Dict
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -16,7 +17,9 @@ from tabseq.baselines.four_metrics import (
     build_catboost_features,
     compute_four_metrics,
     conformal_residual_interval,
+    format_duration,
     infer_depth_from_targets,
+    log_progress,
     make_run_dir,
     save_run_artifacts,
     split_train_calibration,
@@ -37,6 +40,7 @@ def main() -> None:
     ap.add_argument("--model-depth", type=int, default=6)
     ap.add_argument("--learning-rate", type=float, default=0.05)
     ap.add_argument("--l2-leaf-reg", type=float, default=3.0)
+    ap.add_argument("--log-every", type=int, default=50, help="training progress print period")
     ap.add_argument("--out-root", type=str, default="outputs/baselines_four_metrics")
     ap.add_argument("--run-id", type=str, default=None)
     args = ap.parse_args()
@@ -46,7 +50,18 @@ def main() -> None:
     except ImportError as exc:  # pragma: no cover
         raise RuntimeError("catboost is required for scripts/test_catboost_4metrics.py") from exc
 
+    load_start = perf_counter()
+    log_progress(
+        f"loading dataset={args.dataset} seed={int(args.seed)} val_size={float(args.val_size):.2f}"
+    )
     split = load_dataset_split(args.dataset, random_state=int(args.seed), val_size=float(args.val_size))
+    n_cat = 0 if split.X_cat_train is None else int(split.X_cat_train.shape[1])
+    log_progress(
+        "dataset loaded "
+        f"train_rows={len(split.y_train)} val_rows={len(split.y_val)} "
+        f"num_features={int(split.X_train.shape[1])} cat_features={n_cat} "
+        f"elapsed={format_duration(perf_counter() - load_start)}"
+    )
     auto_depth, auto_meta = infer_depth_from_targets(split.y_train)
     depth = int(args.depth) if args.depth is not None else int(auto_depth)
 
@@ -54,7 +69,7 @@ def main() -> None:
     v_max = float(split.y_train.max())
     encoder = TraceLabelEncoder(v_min=v_min, v_max=v_max, depth=depth)
 
-    X_train, X_val, cat_features = _build_catboost_features(split)
+    X_train, X_val, cat_features = build_catboost_features(split)
     idx_fit, idx_cal = split_train_calibration(
         n_samples=len(split.y_train),
         seed=int(args.seed),
@@ -69,7 +84,11 @@ def main() -> None:
         X_cal = X_train[idx_cal]
     y_fit = split.y_train[idx_fit]
     y_cal = split.y_train[idx_cal]
+    log_progress(
+        f"prepared split fit_rows={len(y_fit)} cal_rows={len(y_cal)} val_rows={len(split.y_val)} depth={depth}"
+    )
 
+    log_every = max(1, int(args.log_every))
     model = CatBoostRegressor(
         iterations=int(args.iterations),
         depth=int(args.model_depth),
@@ -77,10 +96,19 @@ def main() -> None:
         l2_leaf_reg=float(args.l2_leaf_reg),
         loss_function="RMSE",
         random_seed=int(args.seed),
-        verbose=False,
+        verbose=log_every,
+    )
+    fit_start = perf_counter()
+    log_progress(
+        "start fit "
+        f"model=catboost loss=RMSE iterations={int(args.iterations)} model_depth={int(args.model_depth)} "
+        f"learning_rate={float(args.learning_rate)} log_every={log_every}"
     )
     model.fit(X_fit, y_fit, cat_features=cat_features or None)
+    log_progress(f"fit finished elapsed={format_duration(perf_counter() - fit_start)}")
 
+    predict_start = perf_counter()
+    log_progress("start predict calibration/validation")
     pred_cal = model.predict(X_cal)
     pred_val = model.predict(X_val)
     y_lower, y_upper, residual_q = conformal_residual_interval(
@@ -89,6 +117,7 @@ def main() -> None:
         y_pred_val=pred_val,
         confidence=float(args.confidence),
     )
+    log_progress(f"prediction and interval construction finished elapsed={format_duration(perf_counter() - predict_start)}")
     metrics = compute_four_metrics(
         y_true=split.y_val,
         y_pred=pred_val,
@@ -136,6 +165,8 @@ def main() -> None:
         **metrics,
     }
 
+    save_start = perf_counter()
+    log_progress("saving artifacts")
     save_run_artifacts(
         run_dir=run_dir,
         config=config,
@@ -146,6 +177,7 @@ def main() -> None:
         y_upper=y_upper,
     )
     model.save_model(os.path.join(run_dir, "model.cbm"))
+    log_progress(f"artifacts saved elapsed={format_duration(perf_counter() - save_start)} run_dir={run_dir}")
 
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     print(f"saved: {run_dir}")
