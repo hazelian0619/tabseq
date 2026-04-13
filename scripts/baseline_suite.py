@@ -31,7 +31,7 @@ def _pick_latest_run_dir(dataset: str, outputs_root: str = "outputs") -> str:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dataset", required=True, help="e.g. california_housing, kin8nm")
+    ap.add_argument("--dataset", required=True, help="e.g. diamonds")
     ap.add_argument(
         "--tabseq-run",
         default=None,

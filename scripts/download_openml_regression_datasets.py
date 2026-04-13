@@ -5,14 +5,14 @@ import argparse
 import json
 import socket
 import sys
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional, Sequence
 
 import numpy as np
 import pandas as pd
-from sklearn.datasets import fetch_california_housing, fetch_openml, load_diabetes
+from sklearn.datasets import fetch_openml
 
 try:
     from tqdm.auto import tqdm
@@ -27,112 +27,7 @@ DEFAULT_ROOT = REPO_ROOT / "data" / "openml_regression"
 @dataclass(frozen=True)
 class DatasetSpec:
     name: str
-    source: str
-    preset: str
-    feature_type: str
-    note: str
-
-
-CURATED_REGRESSION_DATASETS: tuple[DatasetSpec, ...] = (
-    DatasetSpec(
-        name="diabetes",
-        source="sklearn_builtin",
-        preset="core",
-        feature_type="numeric",
-        note="我们之前一直在用的基准数据集，适合先做快速训练和调试。",
-    ),
-    DatasetSpec(
-        name="california_housing",
-        source="sklearn_builtin",
-        preset="core",
-        feature_type="numeric",
-        note="我们之前一直在用的房价回归数据集，适合做主实验。",
-    ),
-    DatasetSpec(
-        name="abalone",
-        source="openml",
-        preset="core",
-        feature_type="mixed",
-        note="小中型，经典 mixed-type 回归，适合先做 smoke/perf 对比。",
-    ),
-    DatasetSpec(
-        name="elevators",
-        source="openml",
-        preset="core",
-        feature_type="numeric",
-        note="中型，纯数值回归，适合看 encoder/decoder 主干是否稳定。",
-    ),
-    DatasetSpec(
-        name="MiamiHousing2016",
-        source="openml",
-        preset="core",
-        feature_type="numeric",
-        note="中型房价回归，数值特征为主，和我们任务比较贴近。",
-    ),
-    DatasetSpec(
-        name="house_sales",
-        source="openml",
-        preset="core",
-        feature_type="mixed",
-        note="中型房价回归，含类别和数值特征，适合测 mixed 表格能力。",
-    ),
-    DatasetSpec(
-        name="Bike_Sharing_Demand",
-        source="openml",
-        preset="core",
-        feature_type="mixed",
-        note="中型 demand 回归，表格结构标准，适合做主实验。",
-    ),
-    DatasetSpec(
-        name="diamonds",
-        source="openml",
-        preset="core",
-        feature_type="mixed",
-        note="中大型 mixed-type 回归，零缺失，适合做稳定 benchmark。",
-    ),
-    DatasetSpec(
-        name="Brazilian_houses",
-        source="openml",
-        preset="extended",
-        feature_type="mixed",
-        note="中型房价回归，mixed-type，和 housing 场景接近。",
-    ),
-    DatasetSpec(
-        name="house_prices_nominal",
-        source="openml",
-        preset="extended",
-        feature_type="mixed",
-        note="较多类别特征，适合看 categorical tokenization 表现。",
-    ),
-    DatasetSpec(
-        name="sulfur",
-        source="openml",
-        preset="extended",
-        feature_type="numeric",
-        note="中型纯数值回归，规模适中，适合补充数值场景。",
-    ),
-    DatasetSpec(
-        name="medical_charges",
-        source="openml",
-        preset="extended",
-        feature_type="numeric",
-        note="较大规模纯数值回归，适合看样本量变大后的表现。",
-    ),
-    DatasetSpec(
-        name="superconduct",
-        source="openml",
-        preset="extended",
-        feature_type="numeric",
-        note="中高维纯数值回归，适合看特征维度上来后 encoder 的表现。",
-    ),
-    DatasetSpec(
-        name="wine_quality",
-        source="openml",
-        preset="extended",
-        feature_type="numeric",
-        note="小而干净的回归基准，适合做稳定 sanity benchmark。",
-    ),
-)
+    openml_data_id: Optional[int] = None
 
 
 OPENML_TARGET_FALLBACKS: dict[str, str] = {
@@ -198,41 +93,26 @@ def _restore_socket_timeout(previous: Optional[float]) -> None:
     socket.setdefaulttimeout(previous)
 
 
-def _resolve_specs(preset: str, datasets_arg: Optional[str]) -> list[DatasetSpec]:
-    by_name = {spec.name: spec for spec in CURATED_REGRESSION_DATASETS}
+def _parse_openml_ids(raw: str) -> list[int]:
+    ids = [int(x.strip()) for x in str(raw).split(",") if x.strip()]
+    if not ids:
+        raise ValueError("openml id list must not be empty")
+    return ids
+
+
+def _resolve_specs(datasets_arg: Optional[str], openml_ids_arg: Optional[str]) -> list[DatasetSpec]:
+    if openml_ids_arg:
+        return [
+            DatasetSpec(
+                name=str(data_id),
+                openml_data_id=int(data_id),
+            )
+            for data_id in _parse_openml_ids(openml_ids_arg)
+        ]
     if datasets_arg:
         names = [x.strip() for x in str(datasets_arg).split(",") if x.strip()]
-        specs = []
-        for name in names:
-            specs.append(
-                by_name.get(
-                    name,
-                    DatasetSpec(
-                        name=name,
-                        source="openml",
-                        preset="custom",
-                        feature_type="unknown",
-                        note="用户自定义数据集，脚本只负责下载和保存。",
-                    ),
-                )
-            )
-        return specs
-
-    if preset == "core":
-        return [spec for spec in CURATED_REGRESSION_DATASETS if spec.preset == "core"]
-    if preset == "extended":
-        return list(CURATED_REGRESSION_DATASETS)
-    raise ValueError(f"unknown preset={preset!r}")
-
-
-def _filter_specs_by_source(specs: Sequence[DatasetSpec], source: str) -> list[DatasetSpec]:
-    if source == "all":
-        return list(specs)
-    if source == "openml":
-        return [spec for spec in specs if spec.source == "openml"]
-    if source == "sklearn_builtin":
-        return [spec for spec in specs if spec.source == "sklearn_builtin"]
-    raise ValueError(f"unknown source={source!r}")
+        return [DatasetSpec(name=name) for name in names]
+    raise ValueError("please provide --openml-ids or --datasets")
 
 
 def _resolve_target_name(bunch: Any) -> str:
@@ -293,30 +173,45 @@ def _to_numeric_target(target: Any) -> pd.Series:
 
 
 def _dataset_dir(root: Path, name: str) -> Path:
-    safe_name = name.replace("/", "__").replace(" ", "_")
+    safe_name = name.replace("/", "__").replace("\\", "__")
     return root / safe_name
 
 
-def _load_builtin_dataset(name: str, cache_root: Path) -> tuple[pd.DataFrame, pd.Series, dict[str, Any]]:
-    if name == "diabetes":
-        bunch = load_diabetes(as_frame=True)
-    elif name == "california_housing":
-        bunch = fetch_california_housing(as_frame=True, data_home=str(cache_root))
-    else:
-        raise ValueError(f"unknown sklearn builtin dataset: {name}")
-
-    X = bunch.data.copy()
-    y = _to_numeric_target(bunch.target)
-    details = {
-        "id": None,
-        "source_url": None,
-        "target_name": getattr(bunch, "target_names", None),
-    }
-    return X, y, details
-
-
 def _download_one(spec: DatasetSpec, root: Path, overwrite: bool) -> dict[str, Any]:
-    dataset_dir = _dataset_dir(root, spec.name)
+    if spec.openml_data_id is not None:
+        bunch = fetch_openml(
+            data_id=int(spec.openml_data_id),
+            as_frame=True,
+            data_home=str(root / "_sklearn_openml_cache"),
+        )
+    else:
+        bunch = fetch_openml(
+            name=spec.name,
+            as_frame=True,
+            data_home=str(root / "_sklearn_openml_cache"),
+        )
+    X = _to_feature_frame(bunch.data, getattr(bunch, "feature_names", None))
+    details = getattr(bunch, "details", {})
+    if not isinstance(details, dict):
+        details = {}
+    source_dataset_name = str(details.get("name") or spec.name)
+    local_dataset_name = source_dataset_name if spec.openml_data_id is not None else spec.name
+    if bunch.target is None:
+        target_name = OPENML_TARGET_FALLBACKS.get(source_dataset_name) or OPENML_TARGET_FALLBACKS.get(spec.name)
+        if target_name is None or target_name not in X.columns:
+            raise ValueError(
+                f"OpenML dataset {source_dataset_name!r} has no parsed target; "
+                "please add an explicit fallback target column name"
+            )
+        y = _to_numeric_target(X[target_name])
+        X = X.drop(columns=[target_name])
+    else:
+        y = _to_numeric_target(bunch.target)
+        target_name = _resolve_target_name(bunch)
+    data_id = details.get("id")
+    source_url = None if data_id is None else f"https://api.openml.org/d/{int(data_id)}"
+
+    dataset_dir = _dataset_dir(root, local_dataset_name)
     dataset_dir.mkdir(parents=True, exist_ok=True)
     table_path = dataset_dir / "table.csv.gz"
     metadata_path = dataset_dir / "metadata.json"
@@ -326,40 +221,6 @@ def _download_one(spec: DatasetSpec, root: Path, overwrite: bool) -> dict[str, A
             metadata = json.load(f)
         metadata["status"] = "skipped_existing"
         return metadata
-
-    if spec.source == "openml":
-        bunch = fetch_openml(
-            name=spec.name,
-            as_frame=True,
-            data_home=str(root / "_sklearn_openml_cache"),
-        )
-        X = _to_feature_frame(bunch.data, getattr(bunch, "feature_names", None))
-        if bunch.target is None:
-            target_name = OPENML_TARGET_FALLBACKS.get(spec.name)
-            if target_name is None or target_name not in X.columns:
-                raise ValueError(
-                    f"OpenML dataset {spec.name!r} has no parsed target; "
-                    "please add an explicit fallback target column name"
-                )
-            y = _to_numeric_target(X[target_name])
-            X = X.drop(columns=[target_name])
-        else:
-            y = _to_numeric_target(bunch.target)
-            target_name = _resolve_target_name(bunch)
-        details = getattr(bunch, "details", {})
-        if not isinstance(details, dict):
-            details = {}
-        data_id = details.get("id")
-        source_url = None if data_id is None else f"https://api.openml.org/d/{int(data_id)}"
-    elif spec.source == "sklearn_builtin":
-        X, y, details = _load_builtin_dataset(spec.name, root / "_sklearn_builtin_cache")
-        target_name = details.get("target_name") or "target"
-        if isinstance(target_name, Sequence) and not isinstance(target_name, (str, bytes)):
-            target_name = target_name[0] if target_name else "target"
-        data_id = details.get("id")
-        source_url = details.get("source_url")
-    else:
-        raise ValueError(f"unknown source={spec.source!r}")
 
     if target_name in X.columns:
         target_name = f"{target_name}__target"
@@ -372,14 +233,13 @@ def _download_one(spec: DatasetSpec, root: Path, overwrite: bool) -> dict[str, A
     cat_cols = [c for c in X.columns.tolist() if c not in num_cols]
 
     metadata = {
-        "name": spec.name,
-        "source": spec.source,
-        "preset": spec.preset,
-        "feature_type": spec.feature_type,
-        "note": spec.note,
+        "name": local_dataset_name,
+        "source_dataset_name": source_dataset_name,
+        "source": "openml",
         "status": "downloaded",
         "downloaded_at_utc": datetime.now(timezone.utc).isoformat(),
         "openml_data_id": int(data_id) if data_id is not None else None,
+        "requested_openml_data_id": int(spec.openml_data_id) if spec.openml_data_id is not None else None,
         "source_url": source_url,
         "target_name": target_name,
         "n_rows": int(frame.shape[0]),
@@ -400,27 +260,29 @@ def _download_one(spec: DatasetSpec, root: Path, overwrite: bool) -> dict[str, A
 
 def _print_specs(specs: Sequence[DatasetSpec]) -> None:
     for spec in specs:
-        print(
-            f"{spec.name:24s} source={spec.source:15s} "
-            f"preset={spec.preset:8s} type={spec.feature_type:7s} {spec.note}"
-        )
+        id_suffix = f" openml_id={spec.openml_data_id}" if spec.openml_data_id is not None else ""
+        print(f"{spec.name:24s} source=openml{id_suffix}")
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(
         description=(
-            "Download a curated set of OpenML tabular regression datasets and "
-            "save them under the local data directory."
+            "Download tabular regression datasets and save them under the local data directory. "
+            "For OpenML, prefer specifying --openml-ids."
         )
     )
     ap.add_argument("--root", type=str, default=str(DEFAULT_ROOT))
-    ap.add_argument("--preset", choices=["core", "extended"], default="core")
-    ap.add_argument("--source", choices=["openml", "sklearn_builtin", "all"], default="openml")
     ap.add_argument(
         "--datasets",
         type=str,
         default=None,
-        help="comma-separated dataset names; if set, overrides --preset",
+        help="comma-separated OpenML dataset names",
+    )
+    ap.add_argument(
+        "--openml-ids",
+        type=str,
+        default=None,
+        help="comma-separated OpenML data ids; datasets will be saved under their actual dataset names",
     )
     ap.add_argument(
         "--timeout-seconds",
@@ -429,13 +291,12 @@ def main() -> None:
         help="network socket timeout in seconds for each dataset download; <=0 disables it",
     )
     ap.add_argument("--overwrite", action="store_true")
-    ap.add_argument("--list", action="store_true", help="list curated datasets and exit")
     args = ap.parse_args()
 
-    specs = _filter_specs_by_source(_resolve_specs(args.preset, args.datasets), args.source)
-    if args.list:
-        _print_specs(specs)
-        return
+    if args.datasets and args.openml_ids:
+        raise SystemExit("use either --datasets or --openml-ids, not both")
+
+    specs = _resolve_specs(args.datasets, args.openml_ids)
 
     root = Path(args.root).resolve()
     root.mkdir(parents=True, exist_ok=True)
@@ -449,7 +310,7 @@ def main() -> None:
     timeout_desc = "disabled" if float(args.timeout_seconds) <= 0 else f"{float(args.timeout_seconds):g}s"
     print(
         f"[RUN] start downloading {len(specs)} dataset(s) to {root} "
-        f"(source={args.source}, preset={args.preset}, timeout={timeout_desc})",
+        f"(timeout={timeout_desc})",
         flush=True,
     )
 
@@ -477,7 +338,7 @@ def main() -> None:
                     ok_count += 1
                     _progress_write(
                         progress,
-                        f"[DONE] {spec.name} success rows={metadata['n_rows']} "
+                        f"[DONE] {metadata['name']} success rows={metadata['n_rows']} "
                         f"features={metadata['n_features']} target={metadata['target_name']}",
                     )
             except Exception as exc:
@@ -498,11 +359,14 @@ def main() -> None:
             "skipped": int(skipped_count),
             "failed": int(fail_count),
         },
-        "selection_rule": (
-            "tabular regression only; include our two existing sklearn baselines plus "
-            "OpenML datasets with moderate size and a mix of numeric-only / mixed-type tables"
-        ),
-        "datasets": [asdict(spec) for spec in specs],
+        "datasets": [
+            {
+                "name": spec.name,
+                "source": "openml",
+                "openml_data_id": spec.openml_data_id,
+            }
+            for spec in specs
+        ],
         "downloads": manifest,
         "failures": failures,
     }

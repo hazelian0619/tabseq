@@ -87,7 +87,7 @@ def main() -> None:
     ap.add_argument("--out-root", default="outputs/baselines")
     ap.add_argument(
         "--default-dataset",
-        default="california_housing",
+        default="diamonds",
         help="dataset name for legacy baselines without dataset in config.json",
     )
     ap.add_argument("--force", action="store_true", help="overwrite existing restored dirs")

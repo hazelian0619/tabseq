@@ -7,7 +7,7 @@ from typing import Optional, Sequence
 
 import numpy as np
 import pandas as pd
-from sklearn.datasets import fetch_california_housing, fetch_openml, load_diabetes
+from sklearn.datasets import fetch_openml
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import OrdinalEncoder, StandardScaler
 
@@ -17,6 +17,10 @@ DEFAULT_LOCAL_DATA_ROOTS = (
     REPO_ROOT / "data" / "openml_regression",
     REPO_ROOT / "data",
 )
+
+
+def _local_dataset_dir_name(name: str) -> str:
+    return str(name).replace("/", "__").replace("\\", "__")
 
 
 @dataclass(frozen=True)
@@ -53,9 +57,12 @@ def _coerce_target(y: object) -> np.ndarray:
 
 def _candidate_local_dataset_dirs(dataset: str) -> list[Path]:
     name = str(dataset)
+    normalized_name = _local_dataset_dir_name(name)
     candidates = []
     for root in DEFAULT_LOCAL_DATA_ROOTS:
         candidates.append(root / name)
+        if normalized_name != name:
+            candidates.append(root / normalized_name)
     return candidates
 
 
@@ -87,18 +94,6 @@ def _load_raw_frame(dataset: str) -> tuple[pd.DataFrame, np.ndarray]:
     local = _load_local_frame(name)
     if local is not None:
         return local
-
-    if name == "california_housing":
-        bunch = fetch_california_housing(as_frame=True)
-        X = bunch.data.copy()
-        y = _coerce_target(bunch.target)
-        return X, y
-
-    if name == "diabetes":
-        bunch = load_diabetes(as_frame=True)
-        X = bunch.data.copy()
-        y = _coerce_target(bunch.target)
-        return X, y
 
     if name.startswith("openml_"):
         data_id = int(name.split("_", 1)[1])

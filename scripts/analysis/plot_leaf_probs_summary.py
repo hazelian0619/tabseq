@@ -4,8 +4,8 @@ Plot aggregated leaf_probs shape + sample-count curves (no top-k/top-p).
 
 Example:
   PYTHONPATH=src python3 scripts/analysis/plot_leaf_probs_summary.py \
-    --inputs outputs/california_housing/run_20260202_112549/leaf_probs_val_greedy_*.npz \
-            outputs/california_housing/run_20260202_112549/leaf_probs_val_prefix_beam_K16_*.npz \
+    --inputs outputs/diamonds/run_20260412_105504_diamonds_ep60_d6_t1p2/leaf_probs_val_greedy_*.npz \
+            outputs/diamonds/run_20260412_105504_diamonds_ep60_d6_t1p2/leaf_probs_val_prefix_beam_K16_*.npz \
     --labels greedy beam16 \
     --show-y-hist \
     --out outputs/analysis/leaf_probs_summary_greedy_vs_beam16.png

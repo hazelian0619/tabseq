@@ -293,7 +293,7 @@ def main() -> None:
     random_state = int(args.random_state) if args.random_state is not None else int(cfg.get("seed", 0))
     set_seed(random_state)
 
-    dataset = args.dataset or cfg.get("dataset", "california_housing")
+    dataset = args.dataset or cfg.get("dataset", "diamonds")
     if args.dataset is not None and cfg.get("dataset") and args.dataset != cfg.get("dataset"):
         raise ValueError(f"dataset mismatch: args.dataset={args.dataset} vs ckpt={cfg.get('dataset')}")
     split = load_dataset_split(dataset, random_state=random_state)

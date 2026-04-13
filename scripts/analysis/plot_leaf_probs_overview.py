@@ -4,7 +4,7 @@ Plot leaf_probs heatmap + sample-count curves (top-k/top-p/peak-merge) in one fi
 
 Example:
   PYTHONPATH=src python3 scripts/analysis/plot_leaf_probs_overview.py \
-    --inputs outputs/california_housing/run_20260202_112549/leaf_probs_val_prefix_beam_K16_T1_C0p9_Nall_*_E200.npz \
+    --inputs outputs/diamonds/run_20260412_105504_diamonds_ep60_d6_t1p2/leaf_probs_val_prefix_beam_K16_T1_C0p9_Nall_*.npz \
     --labels beam16 \
     --top-k 3 5 \
     --top-p 0.8 0.9 \

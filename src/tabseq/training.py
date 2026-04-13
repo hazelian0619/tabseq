@@ -37,7 +37,7 @@ CONSISTENCY_LOSS_WEIGHT = 0.0
 
 @dataclass(frozen=True)
 class TrainConfig:
-    dataset: str = "diabetes"
+    dataset: str = "diamonds"
     seed: int = 0
     val_size: float = 0.2
     batch_size: int = 128
