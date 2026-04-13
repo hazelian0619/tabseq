@@ -3,7 +3,13 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 from typing import List, Optional
+
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+SRC = os.path.join(ROOT, "src")
+if SRC not in sys.path:
+    sys.path.insert(0, SRC)
 
 from tabseq.baselines.suite import load_eval_spec_from_tabseq_run, run_suite
 
@@ -70,4 +76,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

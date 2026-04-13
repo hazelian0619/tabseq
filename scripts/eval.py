@@ -27,10 +27,16 @@ import json
 import os
 from typing import Optional, Tuple
 from datetime import datetime
+import sys
 
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
+
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+SRC = os.path.join(ROOT, "src")
+if SRC not in sys.path:
+    sys.path.insert(0, SRC)
 
 from tabseq.data.datasets import load_dataset_split
 from tabseq.data.tabseq_dataset import TabSeqDataset
@@ -423,6 +429,10 @@ def main():
             depth=depth,
             n_bins=n_bins,
             cat_cardinalities=cat_cardinalities,
+            d_model=int(cfg.get("d_model", 64)),
+            n_heads=int(cfg.get("n_heads", 4)),
+            n_layers=int(cfg.get("n_layers", 2)),
+            dropout=float(cfg.get("dropout", 0.1)),
         )
     else:
         model = model_cls(n_num_features=n_num_features, depth=depth, n_bins=n_bins)
