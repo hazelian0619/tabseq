@@ -28,14 +28,13 @@ def test_baseline_models_forward_shapes() -> None:
 
 def test_load_eval_spec_from_existing_tabseq_run_if_present() -> None:
     # This repo is often used locally with existing outputs/ runs. In CI the folder may not exist.
-    run_dir = os.path.join("outputs", "california_housing", "run_20260202_112549")
+    run_dir = os.path.join("outputs", "diamonds", "run_20260412_105504_diamonds_ep60_d6_t1p2")
     if not os.path.isdir(run_dir):
         pytest.skip("local TabSeq run dir not present")
 
-    spec = load_eval_spec_from_tabseq_run(run_dir, dataset_fallback="california_housing", clip_range=True)
-    assert spec.dataset == "california_housing"
+    spec = load_eval_spec_from_tabseq_run(run_dir, dataset_fallback="diamonds", clip_range=True)
+    assert spec.dataset == "diamonds"
     assert spec.seed == 0
     assert np.isfinite(spec.confidence) and 0.0 < spec.confidence < 1.0
     assert spec.v_min is not None and spec.v_max is not None
     assert spec.v_min < spec.v_max
-

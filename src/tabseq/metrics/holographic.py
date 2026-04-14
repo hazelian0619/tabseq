@@ -100,12 +100,9 @@ class ExtendedHolographicMetric:
 
         # 把“桶索引”映射回“桶边界对应的连续值”
         # 记忆点：这里用的是“区间边界”，与 PDF 的 [L, U] 定义对齐。
-        n_bins = leaf_probs.shape[1]
-        bin_width = float(self.encoder.bin_width)
-        v_min = float(self.encoder.v_min)
-        idx = torch.arange(n_bins, device=leaf_probs.device, dtype=torch.float32)
-        lower_edges = v_min + idx * bin_width
-        upper_edges = lower_edges + bin_width
+        bin_edges = torch.tensor(self.encoder.get_all_bin_edges(), dtype=torch.float32, device=leaf_probs.device)
+        lower_edges = bin_edges[:-1]
+        upper_edges = bin_edges[1:]
         L = lower_edges[lower_indices]  # (B,) 下界连续值（左边界）
         U = upper_edges[upper_indices]  # (B,) 上界连续值（右边界）
         return IntervalResult(L=L, U=U)  # 返回区间结构体
@@ -123,9 +120,12 @@ class ExtendedHolographicMetric:
         统一的区间提取函数（纯 numpy），用于把 leaf_probs -> [L, U]。
 
         - interval_method="cdf"：等尾分位点区间
+        - interval_method="shortest_mass"：最短连续高概率区间（累计概率质量 >= confidence）
+        - interval_method="relaxed_mass"：优先找高密度段；若局部高密度段不够，则回退到全局 shortest-mass，
+          因此最终输出的连续区间始终满足累计概率质量 >= confidence
         - interval_method="peak_merge"：从最高峰出发，向两侧合并连续且 >= alpha*peak 的 bin（不回退）
         """
-        if interval_method not in ("cdf", "peak_merge"):
+        if interval_method not in ("cdf", "shortest_mass", "relaxed_mass", "peak_merge"):
             raise ValueError(f"unknown interval_method: {interval_method}")
         if not (0.0 < float(confidence) < 1.0):
             raise ValueError("confidence must be in (0, 1)")
@@ -144,6 +144,157 @@ class ExtendedHolographicMetric:
             L = bin_edges[lower_idx]
             U = bin_edges[upper_idx + 1]
             return L.astype(np.float32), U.astype(np.float32)
+
+        if interval_method == "shortest_mass":
+            target = float(confidence)
+            eps = 1e-12
+            L = np.empty((B,), dtype=np.float32)
+            U = np.empty((B,), dtype=np.float32)
+            for i in range(B):
+                probs = leaf_probs[i]
+                left = 0
+                mass = 0.0
+                best_left = 0
+                best_right = n_bins - 1
+                best_width = float("inf")
+                best_mass = float("inf")
+
+                for right in range(n_bins):
+                    mass += float(probs[right])
+                    while left <= right and (mass - float(probs[left])) >= target - eps:
+                        mass -= float(probs[left])
+                        left += 1
+
+                    if mass >= target - eps:
+                        width = float(bin_edges[right + 1] - bin_edges[left])
+                        if (
+                            width < best_width - eps
+                            or (abs(width - best_width) <= eps and mass < best_mass - eps)
+                            or (
+                                abs(width - best_width) <= eps
+                                and abs(mass - best_mass) <= eps
+                                and left < best_left
+                            )
+                        ):
+                            best_left = left
+                            best_right = right
+                            best_width = width
+                            best_mass = mass
+
+                L[i] = float(bin_edges[best_left])
+                U[i] = float(bin_edges[best_right + 1])
+            return L, U
+
+        if interval_method == "relaxed_mass":
+            target = float(confidence)
+            eps = 1e-12
+            valley_tau = 0.3
+            max_gap_bins = 2
+            L = np.empty((B,), dtype=np.float32)
+            U = np.empty((B,), dtype=np.float32)
+
+            def pick_better_candidate(
+                current: Optional[tuple[int, int, float, float]],
+                candidate: tuple[int, int, float, float],
+            ) -> tuple[int, int, float, float]:
+                if current is None:
+                    return candidate
+                _, _, best_width, best_mass = current
+                cand_left, _, cand_width, cand_mass = candidate
+                if (
+                    cand_width < best_width - eps
+                    or (abs(cand_width - best_width) <= eps and cand_mass < best_mass - eps)
+                    or (
+                        abs(cand_width - best_width) <= eps
+                        and abs(cand_mass - best_mass) <= eps
+                        and cand_left < current[0]
+                    )
+                ):
+                    return candidate
+                return current
+
+            def best_target_interval_in_span(
+                probs: np.ndarray,
+                span_left: int,
+                span_right: int,
+            ) -> Optional[tuple[int, int, float, float]]:
+                left = span_left
+                mass = 0.0
+                best: Optional[tuple[int, int, float, float]] = None
+                for right in range(span_left, span_right + 1):
+                    mass += float(probs[right])
+                    while left <= right and (mass - float(probs[left])) >= target - eps:
+                        mass -= float(probs[left])
+                        left += 1
+
+                    if mass >= target - eps:
+                        width = float(bin_edges[right + 1] - bin_edges[left])
+                        best = pick_better_candidate(best, (left, right, width, mass))
+                return best
+
+            for i in range(B):
+                probs = leaf_probs[i]
+                peak = float(np.max(probs))
+                if peak <= 0.0:
+                    L[i] = float(bin_edges[0])
+                    U[i] = float(bin_edges[-1])
+                    continue
+
+                active = probs >= (valley_tau * peak)
+                segments: list[tuple[int, int]] = []
+                start: Optional[int] = None
+                for idx, is_active in enumerate(active.tolist()):
+                    if is_active and start is None:
+                        start = idx
+                    elif not is_active and start is not None:
+                        segments.append((start, idx - 1))
+                        start = None
+                if start is not None:
+                    segments.append((start, n_bins - 1))
+
+                best_interval: Optional[tuple[int, int, float, float]] = None
+                for seg_left, seg_right in segments:
+                    candidate = best_target_interval_in_span(probs, seg_left, seg_right)
+                    if candidate is not None:
+                        best_interval = pick_better_candidate(best_interval, candidate)
+
+                # 若单个高密度段不够，则允许跨很短的 gap merge 相邻段。
+                if best_interval is None and segments:
+                    for start_idx in range(len(segments)):
+                        span_left = segments[start_idx][0]
+                        span_right = segments[start_idx][1]
+
+                        candidate = best_target_interval_in_span(probs, span_left, span_right)
+                        if candidate is not None:
+                            best_interval = pick_better_candidate(best_interval, candidate)
+
+                        for end_idx in range(start_idx + 1, len(segments)):
+                            prev_right = segments[end_idx - 1][1]
+                            next_left = segments[end_idx][0]
+                            gap_width = next_left - prev_right - 1
+                            if gap_width > max_gap_bins:
+                                break
+
+                            span_right = segments[end_idx][1]
+                            candidate = best_target_interval_in_span(probs, span_left, span_right)
+                            if candidate is not None:
+                                best_interval = pick_better_candidate(best_interval, candidate)
+
+                if best_interval is not None:
+                    best_left, best_right, _, _ = best_interval
+                    L[i] = float(bin_edges[best_left])
+                    U[i] = float(bin_edges[best_right + 1])
+                    continue
+
+                # 若局部高密度段在“有限 gap merge”约束下仍然到不了 target，
+                # 则回退到全局 shortest-mass，保证最终区间累计概率质量 >= confidence。
+                best_interval = best_target_interval_in_span(probs, 0, n_bins - 1)
+                if best_interval is None:
+                    raise RuntimeError("global shortest-mass interval failed to reach target confidence")
+                best_left, best_right, _, _ = best_interval
+                L[i] = float(bin_edges[best_left])
+                U[i] = float(bin_edges[best_right + 1])
+            return L, U
 
         alpha = float(peak_merge_alpha)
         if not (0.0 < alpha <= 1.0):
@@ -165,6 +316,103 @@ class ExtendedHolographicMetric:
             L[i] = float(bin_edges[left])
             U[i] = float(bin_edges[right + 1])
         return L, U
+
+    def compute_bin_interval_metrics_from_leaf_probs(
+        self,
+        leaf_probs: torch.Tensor,
+        y_true: torch.Tensor,
+        y_leaf_idx: torch.Tensor,
+        *,
+        confidence: float = 0.90,
+        interval_method: str = "cdf",
+        peak_merge_alpha: float = 0.33,
+        tolerance_bins: int = 1,
+    ) -> Dict:
+        """
+        面向 `scripts/test.py` 的精简测试指标。
+
+        - bin_acc: 预测叶子桶 argmax 是否和真实 y_leaf_idx 完全一致
+        - tol_bin_acc@k: 允许预测桶与真实桶相差不超过 k
+        - avg_coverage: 与 CQR 一致的经验覆盖率
+        - avg_length: 与 CQR 一致的平均区间长度
+
+        注意：
+        - `y_leaf_idx` 应该来自 clipped y，因为叶子桶定义在训练范围 [v_min, v_max] 上。
+        - `y_true` 建议传 raw y；这样若验证样本超出训练范围，coverage 会如实下降。
+        """
+        if leaf_probs.ndim != 2:
+            raise ValueError(f"leaf_probs must be 2D (B, n_bins), got shape={tuple(leaf_probs.shape)}")
+
+        if y_true.ndim != 1:
+            y_true = y_true.view(-1)
+        if y_leaf_idx.ndim != 1:
+            y_leaf_idx = y_leaf_idx.view(-1)
+        if leaf_probs.shape[0] != y_true.shape[0] or leaf_probs.shape[0] != y_leaf_idx.shape[0]:
+            raise ValueError(
+                "batch mismatch: "
+                f"leaf_probs.shape[0]={leaf_probs.shape[0]}, "
+                f"y_true.shape[0]={y_true.shape[0]}, "
+                f"y_leaf_idx.shape[0]={y_leaf_idx.shape[0]}"
+            )
+        if int(tolerance_bins) < 0:
+            raise ValueError("tolerance_bins must be >= 0")
+
+        device = leaf_probs.device
+        y_true = y_true.to(device=device, dtype=torch.float32)
+        y_leaf_idx = y_leaf_idx.to(device=device, dtype=torch.long)
+        leaf_probs = leaf_probs / (torch.sum(leaf_probs, dim=1, keepdim=True) + 1e-9)
+
+        pred_leaf_idx = torch.argmax(leaf_probs, dim=1)
+        bin_acc = float(torch.mean((pred_leaf_idx == y_leaf_idx).float()).item())
+        tol_bin_acc = float(torch.mean((torch.abs(pred_leaf_idx - y_leaf_idx) <= int(tolerance_bins)).float()).item())
+
+        leaf_probs_np = leaf_probs.detach().cpu().numpy()
+        n_bins = int(leaf_probs_np.shape[1])
+        bin_edges = self.encoder.get_all_bin_edges().astype(np.float32)
+        L_pred_np, U_pred_np = self._interval_bounds_from_leaf_probs_np(
+            leaf_probs_np,
+            bin_edges=bin_edges,
+            confidence=float(confidence),
+            interval_method=str(interval_method),
+            peak_merge_alpha=float(peak_merge_alpha),
+        )
+
+        y_true_np = y_true.detach().cpu().numpy()
+        covered = (y_true_np >= L_pred_np) & (y_true_np <= U_pred_np)
+        avg_coverage = float(np.mean(covered))
+        avg_length = float(np.mean(U_pred_np - L_pred_np))
+
+        return {
+            "bin_acc": bin_acc,
+            f"tol_bin_acc@{int(tolerance_bins)}": tol_bin_acc,
+            "avg_coverage": avg_coverage,
+            "avg_length": avg_length,
+        }
+
+    def compute_bin_interval_metrics(
+        self,
+        model_probs: torch.Tensor,
+        y_true: torch.Tensor,
+        y_leaf_idx: torch.Tensor,
+        *,
+        confidence: float = 0.90,
+        interval_method: str = "cdf",
+        peak_merge_alpha: float = 0.33,
+        tolerance_bins: int = 1,
+    ) -> Dict:
+        """先把 step_probs 合成为 leaf_probs，再计算精简测试指标。"""
+        if model_probs.ndim != 3:
+            raise ValueError(f"model_probs must be 3D (B, depth, n_bins), got shape={tuple(model_probs.shape)}")
+        leaf_probs = self.leaf_probs_from_step_probs(model_probs)
+        return self.compute_bin_interval_metrics_from_leaf_probs(
+            leaf_probs,
+            y_true,
+            y_leaf_idx,
+            confidence=float(confidence),
+            interval_method=str(interval_method),
+            peak_merge_alpha=float(peak_merge_alpha),
+            tolerance_bins=int(tolerance_bins),
+        )
 
     def compute_metrics(
         self,
@@ -211,10 +459,7 @@ class ExtendedHolographicMetric:
 
         # 3) 区间：从 leaf_probs 提取 [L, U]
         leaf_probs_np = leaf_probs.detach().cpu().numpy()
-        bin_edges = (
-            float(self.encoder.v_min)
-            + np.arange(int(leaf_probs_np.shape[1]) + 1, dtype=np.float32) * float(self.encoder.bin_width)
-        ).astype(np.float32)
+        bin_edges = self.encoder.get_all_bin_edges().astype(np.float32)
         L_pred_np, U_pred_np = self._interval_bounds_from_leaf_probs_np(
             leaf_probs_np,
             bin_edges=bin_edges,
@@ -311,9 +556,7 @@ class ExtendedHolographicMetric:
         rmse = torch.sqrt(torch.mean((y_pred_point - y_true) ** 2)).item()
 
         leaf_probs_np = leaf_probs.detach().cpu().numpy()
-        bin_edges = (
-            float(self.encoder.v_min) + np.arange(int(n_bins) + 1, dtype=np.float32) * float(self.encoder.bin_width)
-        ).astype(np.float32)
+        bin_edges = self.encoder.get_all_bin_edges().astype(np.float32)
         L_pred_np, U_pred_np = self._interval_bounds_from_leaf_probs_np(
             leaf_probs_np,
             bin_edges=bin_edges,
