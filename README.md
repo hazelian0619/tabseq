@@ -85,12 +85,12 @@ data/openml_regression/diamonds/
 
 
 ```bash
-python scripts/run_train_test_all_datasets.py --datasets diamonds --temperature-grid 1.2
+python scripts/run_train_test_all_datasets.py --datasets diamonds --depth-grid 6 --temperature-grid 1.2
 ```
 
 这个脚本会自动：
 
-1. 选择 depth 网格
+1. 按 `--depth-grid` 选择 depth 网格
 2. 依次训练不同 temperature
 3. 调用 `scripts/test.py` 跑推理
 4. 在 `outputs/batch_runs/<timestamp>/` 下保存汇总结果
@@ -119,17 +119,17 @@ python scripts/run_train_test_all_datasets.py --datasets diamonds --temperature-
 ### 残差 conformal 基线
 
 ```bash
-bash scripts/run_lightgbm_4metrics_all.sh --datasets diamonds
-bash scripts/run_xgboost_4metrics_all.sh --datasets diamonds
-bash scripts/run_catboost_4metrics_all.sh --datasets diamonds
+bash scripts/run_lightgbm_4metrics_all.sh --datasets diamonds -- --depth 6
+bash scripts/run_xgboost_4metrics_all.sh --datasets diamonds -- --depth 6
+bash scripts/run_catboost_4metrics_all.sh --datasets diamonds -- --depth 6
 ```
 
 ### 分位数/CQR 基线
 
 ```bash
-bash scripts/run_lightgbm_quantile_4metrics_all.sh --datasets diamonds
-bash scripts/run_xgboost_quantile_4metrics_all.sh --datasets diamonds
-bash scripts/run_catboost_quantile_4metrics_all.sh --datasets diamonds
+bash scripts/run_lightgbm_quantile_4metrics_all.sh --datasets diamonds -- --depth 6
+bash scripts/run_xgboost_quantile_4metrics_all.sh --datasets diamonds -- --depth 6
+bash scripts/run_catboost_quantile_4metrics_all.sh --datasets diamonds -- --depth 6
 ```
 
 这些基线结果通常保存在：
@@ -143,7 +143,7 @@ outputs/baselines_four_metrics/<dataset>/<method>/run_<timestamp>/
 如果你已经跑完 TabSeq 和各基线，可以用：
 
 ```bash
-python scripts/collect_all_methods_summary.py --datasets diamonds
+python scripts/collect_all_methods_summary.py --datasets diamonds,bodyfat
 ```
 
 它会自动读取：
@@ -158,5 +158,5 @@ python scripts/collect_all_methods_summary.py --datasets diamonds
 如果没有 GPU，可以在最终脚本里显式指定，例如：
 
 ```bash
-python scripts/run_train_test_all_datasets.py --datasets diamonds --temperature-grid 1.2 --device cpu
+python scripts/run_train_test_all_datasets.py --datasets diamonds --depth-grid 6 --temperature-grid 1.2 --device cpu
 ```
